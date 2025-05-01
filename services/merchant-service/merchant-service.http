@@ -1,0 +1,49 @@
+
+# Merchant Service Endpoints
+
+### Create Merchant
+POST /merchants HTTP/1.1
+Host: localhost:8082
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJtZXJjaGFudF9pZCI6MSwiZXhwIjoxNzQ2MDY4NTY2LCJpYXQiOjE3NDYwNjQ5NjZ9.av13J_jb75PPVyj19-luqhH_p8Rk-fK_lPBZABobDiM
+
+{
+  "name": "My Store",
+  "description": "My awesome online store",
+  "owner_id": 1
+}
+
+### Get Merchant by ID
+GET /merchants/1 HTTP/1.1
+Host: localhost:8082
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJtZXJjaGFudF9pZCI6MSwiZXhwIjoxNzQ2MDY4NTY2LCJpYXQiOjE3NDYwNjQ5NjZ9.av13J_jb75PPVyj19-luqhH_p8Rk-fK_lPBZABobDiM
+
+### List Merchants by Owner
+GET /merchants?owner_id=1 HTTP/1.1
+Host: localhost:8082
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJtZXJjaGFudF9pZCI6MSwiZXhwIjoxNzQ2MDY4NTY2LCJpYXQiOjE3NDYwNjQ5NjZ9.av13J_jb75PPVyj19-luqhH_p8Rk-fK_lPBZABobDiM
+
+### List All Merchants (with pagination)
+GET /merchants?page=1&limit=10 HTTP/1.1
+Host: localhost:8082
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJtZXJjaGFudF9pZCI6MSwiZXhwIjoxNzQ2MDY4NTY2LCJpYXQiOjE3NDYwNjQ5NjZ9.av13J_jb75PPVyj19-luqhH_p8Rk-fK_lPBZABobDiM
+
+### Update Merchant
+PUT /merchants/1 HTTP/1.1
+Host: localhost:8082
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJtZXJjaGFudF9pZCI6MSwiZXhwIjoxNzQ2MDY4NTY2LCJpYXQiOjE3NDYwNjQ5NjZ9.av13J_jb75PPVyj19-luqhH_p8Rk-fK_lPBZABobDiM
+
+{
+  "name": "Updated Store Name",
+  "description": "Updated store description"
+}
+
+### Delete Merchant
+DELETE /merchants/1 HTTP/1.1
+Host: localhost:8082
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJtZXJjaGFudF9pZCI6MSwiZXhwIjoxNzQ2MDY4NTY2LCJpYXQiOjE3NDYwNjQ5NjZ9.av13J_jb75PPVyj19-luqhH_p8Rk-fK_lPBZABobDiM
+
+### Get Merchant Metrics
+GET /metrics HTTP/1.1
+Host: localhost:8082

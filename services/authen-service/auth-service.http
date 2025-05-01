@@ -1,0 +1,45 @@
+# Authentication Service Endpoints
+
+### Register User
+POST /auth/register HTTP/1.1
+Host: localhost:8081
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "securepassword123"
+}
+
+### Login
+POST /auth/login HTTP/1.1
+Host: localhost:8081
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "securepassword123"
+}
+
+### Associate User with Merchant
+POST /auth/associate-merchant HTTP/1.1
+Host: localhost:8081
+Content-Type: application/json
+
+{
+  "user_id": 1,
+  "merchant_id": 1
+}
+
+### Login with Merchant ID
+POST /auth/login HTTP/1.1
+Host: localhost:8081
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "securepassword123",
+  "merchant_id": 1
+}
+
+### Get metrics
+GET http://localhost:8081/metrics
