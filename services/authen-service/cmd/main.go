@@ -5,6 +5,7 @@ import (
 	"auth-service/internal/middleware"
 	"auth-service/pkg/database"
 	applogger "auth-service/pkg/logger"
+	"auth-service/prometheus"
 	"fmt"
 	"os"
 	"strconv"
@@ -43,14 +44,35 @@ func main() {
 
 	// Initialize Echo framework
 	e := echo.New()
+
+	// Apply middleware - order matters
 	e.Use(middleware.RequestIDMiddleware)
 	e.Use(applogger.Middleware(zapLogger))
+	// Add the Prometheus metrics middleware - this should be after request ID but before other middleware
+	e.Use(prometheus.MetricsMiddleware())
 
-	// Register routes
+	// Public auth endpoints (no auth required)
 	e.POST("/auth/login", handler.Login)
 	e.POST("/auth/register", handler.Register)
-	e.POST("/auth/associate-merchant", handler.AssociateMerchant)
 	e.GET("/metrics", handler.MetricsHandler)
+
+	// Backward compatibility endpoint (legacy)
+	e.POST("/auth/associate-merchant", handler.AssociateMerchant)
+
+	// Secure group - all endpoints require authentication
+	secured := e.Group("")
+	secured.Use(middleware.AuthMiddleware)
+
+	// Tenant endpoints
+	secured.POST("/tenants", handler.CreateTenant)
+	secured.GET("/tenants/:id", handler.GetTenant)
+	secured.GET("/tenants", handler.ListUserTenants)
+	secured.POST("/tenants/switch", handler.SwitchTenant)
+	secured.POST("/tenants/default", handler.SetDefaultTenant)
+
+	// Tenant user management
+	secured.POST("/tenants/users", handler.AddUserToTenant)
+	secured.DELETE("/tenants/:tenant_id/users/:user_id", handler.RemoveUserFromTenant)
 
 	// Get server port from environment variable
 	port := getEnv("SERVER_PORT", "8081")

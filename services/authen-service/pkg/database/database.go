@@ -67,7 +67,7 @@ func Initialize(config DBConfig) error {
 	}
 
 	// AutoMigrate will automatically create or update the table structure based on our models
-	err = DB.AutoMigrate(&model.User{})
+	err = DB.AutoMigrate(&model.User{}, &model.Tenant{}, &model.UserTenant{})
 	if err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 		return err
