@@ -56,9 +56,6 @@ func main() {
 	e.POST("/auth/register", handler.Register)
 	e.GET("/metrics", handler.MetricsHandler)
 
-	// Backward compatibility endpoint (legacy)
-	e.POST("/auth/associate-merchant", handler.AssociateMerchant)
-
 	// Secure group - all endpoints require authentication
 	secured := e.Group("")
 	secured.Use(middleware.AuthMiddleware)

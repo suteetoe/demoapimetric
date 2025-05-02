@@ -20,10 +20,9 @@ func Login(c echo.Context) error {
 
 	// Parse request
 	var req struct {
-		Email      string `json:"email"`
-		Password   string `json:"password"`
-		MerchantID *uint  `json:"merchant_id,omitempty"`
-		TenantID   *uint  `json:"tenant_id,omitempty"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		TenantID *uint  `json:"tenant_id,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -89,22 +88,14 @@ func Login(c echo.Context) error {
 		if result := database.GetDB().Select("role").Where("user_id = ? AND tenant_id = ?", user.ID, *user.TenantID).First(&userTenant); result.Error == nil {
 			userRole = userTenant.Role
 		}
-	} else if req.MerchantID != nil {
-		// For backward compatibility
-		user.MerchantID = req.MerchantID
-		if err := database.GetDB().Model(&user).Update("merchant_id", req.MerchantID).Error; err != nil {
-			log.Error("Failed to update user's merchant ID", zap.Error(err))
-			prometheus.RecordAuthError("merchant_update_failed")
-			return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update merchant association"})
-		}
 	}
 
 	// Generate JWT token with tenant information if available
 	var token string
 	if selectedTenantID != nil {
-		token, err = jwtutil.GenerateTokenWithTenant(user.Email, user.ID, user.MerchantID, selectedTenantID, tenantName, userRole)
+		token, err = jwtutil.GenerateTokenWithTenant(user.Email, user.ID, selectedTenantID, tenantName, userRole)
 	} else {
-		token, err = jwtutil.GenerateToken(user.Email, user.ID, user.MerchantID)
+		token, err = jwtutil.GenerateToken(user.Email, user.ID)
 	}
 
 	if err != nil {
@@ -125,17 +116,15 @@ func Login(c echo.Context) error {
 			zap.String("role", userRole))
 	} else {
 		log.Info("User logged in",
-			zap.String("email", user.Email),
-			zap.Uint("merchant_id", nilSafeUint(user.MerchantID)))
+			zap.String("email", user.Email))
 	}
 
 	// Build response with tenant info if available
 	response := echo.Map{
 		"token": token,
 		"user": map[string]interface{}{
-			"id":          user.ID,
-			"email":       user.Email,
-			"merchant_id": user.MerchantID,
+			"id":    user.ID,
+			"email": user.Email,
 		},
 	}
 
@@ -212,139 +201,6 @@ func Register(c echo.Context) error {
 		"user": map[string]interface{}{
 			"id":    user.ID,
 			"email": user.Email,
-		},
-	})
-}
-
-// AssociateMerchant associates a user with a merchant
-func AssociateMerchant(c echo.Context) error {
-	log := logger.FromContext(c)
-	prometheus.MerchantAssociationCounter.Inc()
-
-	// Parse request
-	var req struct {
-		UserID     uint   `json:"user_id"`
-		MerchantID uint   `json:"merchant_id"`
-		Role       string `json:"role,omitempty"` // Optional role
-	}
-
-	if err := c.Bind(&req); err != nil {
-		log.Error("Failed to parse merchant association request", zap.Error(err))
-		prometheus.RecordAuthError("invalid_request")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
-	}
-
-	if req.UserID == 0 || req.MerchantID == 0 {
-		log.Error("Invalid merchant association data",
-			zap.Uint("user_id", req.UserID),
-			zap.Uint("merchant_id", req.MerchantID))
-		prometheus.RecordAuthError("incomplete_merchant_association")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "user_id and merchant_id are required"})
-	}
-
-	// Set default role if not provided
-	if req.Role == "" {
-		req.Role = "member"
-	}
-
-	// Find user in database - track DB query
-	defer prometheus.TrackDBOperation("query")(time.Now())
-	var user model.User
-	result := database.GetDB().First(&user, req.UserID)
-	if result.Error != nil {
-		log.Error("User not found", zap.Uint("user_id", req.UserID))
-		prometheus.RecordAuthError("user_not_found")
-		return c.JSON(http.StatusNotFound, echo.Map{"error": "user not found"})
-	}
-
-	// Create merchant_user association in database - track DB insert operation
-	defer prometheus.TrackDBOperation("insert")(time.Now())
-
-	// Define a struct that represents the merchant_users table
-	type MerchantUser struct {
-		MerchantID uint   `json:"merchant_id"`
-		UserID     uint   `json:"user_id"`
-		Role       string `json:"role"`
-		Active     bool   `json:"active"`
-		CreatedAt  time.Time
-		UpdatedAt  time.Time
-	}
-
-	// Check if association already exists
-	var existingAssociation MerchantUser
-	checkResult := database.GetDB().Table("merchant_users").
-		Where("merchant_id = ? AND user_id = ?", req.MerchantID, req.UserID).
-		First(&existingAssociation)
-
-	if checkResult.Error == nil {
-		// Association exists, update it
-		updateData := map[string]interface{}{
-			"role":       req.Role,
-			"updated_at": time.Now(),
-		}
-
-		if updateResult := database.GetDB().Table("merchant_users").
-			Where("merchant_id = ? AND user_id = ?", req.MerchantID, req.UserID).
-			Updates(updateData).Error; updateResult != nil {
-			log.Error("Failed to update merchant user association", zap.Error(updateResult))
-			prometheus.RecordAuthError("merchant_association_update_failed")
-			return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update merchant association"})
-		}
-
-		log.Info("User association with merchant updated",
-			zap.Uint("user_id", user.ID),
-			zap.Uint("merchant_id", req.MerchantID),
-			zap.String("role", req.Role))
-
-		return c.JSON(http.StatusOK, echo.Map{
-			"message": "User association with merchant updated successfully",
-			"user": map[string]interface{}{
-				"id":    user.ID,
-				"email": user.Email,
-			},
-			"merchant_id": req.MerchantID,
-			"role":        req.Role,
-		})
-	}
-
-	// Create new association
-	merchantUser := MerchantUser{
-		MerchantID: req.MerchantID,
-		UserID:     user.ID,
-		Role:       req.Role,
-		Active:     true,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
-	}
-
-	if result := database.GetDB().Table("merchant_users").Create(&merchantUser); result.Error != nil {
-		log.Error("Failed to create merchant user association", zap.Error(result.Error))
-		prometheus.RecordAuthError("merchant_association_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to create merchant association"})
-	}
-
-	// Also update user's primary merchant ID for backward compatibility and convenience
-	if err := database.GetDB().Model(&user).Update("merchant_id", req.MerchantID).Error; err != nil {
-		log.Error("Failed to update user's merchant ID", zap.Error(err))
-		// We won't fail here as the main association was created successfully
-	}
-
-	log.Info("User associated with merchant",
-		zap.Uint("user_id", user.ID),
-		zap.Uint("merchant_id", req.MerchantID),
-		zap.String("role", req.Role))
-
-	return c.JSON(http.StatusOK, echo.Map{
-		"message": "User associated with merchant successfully",
-		"user": map[string]interface{}{
-			"id":          user.ID,
-			"email":       user.Email,
-			"merchant_id": user.MerchantID, // Still include the primary merchant ID
-		},
-		"merchant_user": map[string]interface{}{
-			"merchant_id": req.MerchantID,
-			"user_id":     user.ID,
-			"role":        req.Role,
 		},
 	})
 }

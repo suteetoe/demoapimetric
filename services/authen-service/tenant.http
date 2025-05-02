@@ -1,0 +1,71 @@
+# Tenant Service Endpoints
+
+### Create a New Tenant
+POST /tenants HTTP/1.1
+Host: localhost:8081
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJleHAiOjE3NDYxNTc2MTYsImlhdCI6MTc0NjE1NDAxNn0.U8ZnjV--XwP4U_t88d2XehJdJaf1hxUFhH_-VVxXlW0
+Content-Type: application/json
+
+{
+  "name": "My Company",
+  "description": "My company tenant for multi-tenant access",
+  "settings": "{\"theme\": \"light\", \"features\": [\"billing\", \"reporting\"]}"
+}
+
+### Get Tenant Details
+GET /tenants/1 HTTP/1.1
+Host: localhost:8081
+Authorization: Bearer your_jwt_token_here
+
+### List All Tenants for Current User
+GET /tenants HTTP/1.1
+Host: localhost:8081
+Authorization: Bearer your_jwt_token_here
+
+### Switch to a Different Tenant
+POST /tenants/switch HTTP/1.1
+Host: localhost:8081
+Authorization: Bearer your_jwt_token_here
+Content-Type: application/json
+
+{
+  "tenant_id": 2
+}
+
+### Set Default Tenant
+POST /tenants/default HTTP/1.1
+Host: localhost:8081
+Authorization: Bearer your_jwt_token_here
+Content-Type: application/json
+
+{
+  "tenant_id": 1
+}
+
+### Add User to Tenant
+POST /tenants/users HTTP/1.1
+Host: localhost:8081
+Authorization: Bearer your_jwt_token_here
+Content-Type: application/json
+
+{
+  "tenant_id": 1,
+  "user_email": "newuser@example.com",
+  "role": "member"
+}
+
+### Remove User from Tenant
+DELETE /tenants/1/users/2 HTTP/1.1
+Host: localhost:8081
+Authorization: Bearer your_jwt_token_here
+
+### Login with Tenant Context
+POST /auth/login HTTP/1.1
+Host: localhost:8081
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "securepassword123",
+  "tenant_id": 1
+}

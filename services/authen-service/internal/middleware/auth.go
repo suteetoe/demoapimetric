@@ -48,11 +48,6 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		c.Set("user_id", claims.UserID)
 		c.Set("email", claims.Email)
 
-		// Store merchant ID for backward compatibility
-		if claims.MerchantID != nil {
-			c.Set("merchant_id", *claims.MerchantID)
-		}
-
 		// Store tenant information if available
 		if claims.TenantID != nil {
 			c.Set("tenant_id", *claims.TenantID)

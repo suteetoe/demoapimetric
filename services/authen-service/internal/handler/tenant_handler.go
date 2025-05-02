@@ -273,7 +273,7 @@ func SwitchTenant(c echo.Context) error {
 
 	// Generate new JWT token with tenant context
 	tenantID := req.TenantID
-	token, err := jwtutil.GenerateTokenWithTenant(email, userID, nil, &tenantID, tenant.Name, userTenant.Role)
+	token, err := jwtutil.GenerateTokenWithTenant(email, userID, &tenantID, tenant.Name, userTenant.Role)
 	if err != nil {
 		log.Error("Failed to generate token", zap.Error(err))
 		prometheus.RecordAuthError("token_generation_failed")

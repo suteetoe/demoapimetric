@@ -28,14 +28,6 @@ var (
 		},
 	)
 
-	// Merchant association counter
-	MerchantAssociationCounter = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "auth_merchant_association_total",
-			Help: "Total number of merchant associations",
-		},
-	)
-
 	// Tenant operation counter
 	TenantOperationCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -147,7 +139,6 @@ func init() {
 	// Register counters
 	prometheus.MustRegister(LoginCounter)
 	prometheus.MustRegister(RegisterCounter)
-	prometheus.MustRegister(MerchantAssociationCounter)
 	prometheus.MustRegister(TenantOperationCounter)
 	prometheus.MustRegister(HTTPRequestCounter)
 	prometheus.MustRegister(AuthErrorCounter)
