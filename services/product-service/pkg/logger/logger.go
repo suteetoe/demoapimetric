@@ -1,64 +1,67 @@
 package logger
 
 import (
-	"sync"
-	"time"
+	"product-service/pkg/config"
 
-	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-var (
-	once     sync.Once
-	instance *zap.Logger
-)
+var log *zap.Logger
 
-func New() *zap.SugaredLogger {
-	return GetLogger().Sugar()
-}
+// InitLogger initializes the logger with configuration
+func InitLogger(config *config.Config) {
+	// Get logger environment from config
+	env := config.Server.Env
+	logLevel := config.Log.Level
 
-func GetLogger() *zap.Logger {
-	once.Do(func() {
-		cfg := zap.NewProductionConfig()
-		cfg.OutputPaths = []string{"stdout"}
-		logger, err := cfg.Build()
-		if err != nil {
-			panic(err)
-		}
-		instance = logger
-	})
-	return instance
-}
-
-// Middleware returns an Echo middleware that logs HTTP requests
-func Middleware(logger *zap.Logger) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			start := time.Now()
-
-			// Add request ID to context if available
-			requestID := c.Request().Header.Get("X-Request-ID")
-			if requestID == "" {
-				requestID = c.Response().Header().Get("X-Request-ID")
-			}
-
-			// Process the request
-			err := next(c)
-
-			// Log after request is processed
-			latency := time.Since(start)
-
-			// Create structured log entry
-			logger.Info("HTTP Request",
-				zap.String("method", c.Request().Method),
-				zap.String("path", c.Request().URL.Path),
-				zap.Int("status", c.Response().Status),
-				zap.Duration("latency", latency),
-				zap.String("request_id", requestID),
-				zap.String("ip", c.RealIP()),
-			)
-
-			return err
-		}
+	// Configure logger based on configured log level
+	var level zapcore.Level
+	switch logLevel {
+	case "debug":
+		level = zapcore.DebugLevel
+	case "info":
+		level = zapcore.InfoLevel
+	case "warn":
+		level = zapcore.WarnLevel
+	case "error":
+		level = zapcore.ErrorLevel
+	default:
+		level = zapcore.InfoLevel
 	}
+
+	var err error
+	if env == "production" {
+		// Production logger configuration
+		prodConfig := zap.NewProductionConfig()
+		prodConfig.Level = zap.NewAtomicLevelAt(level)
+		prodConfig.EncoderConfig.TimeKey = "timestamp"
+		prodConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+		log, err = prodConfig.Build(zap.Fields(
+			config.LogConfig()...,
+		))
+	} else {
+		// Development logger configuration with colors and human-friendly output
+		devConfig := zap.NewDevelopmentConfig()
+		devConfig.Level = zap.NewAtomicLevelAt(level)
+		devConfig.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+
+		log, err = devConfig.Build(zap.Fields(
+			config.LogConfig()...,
+		))
+	}
+
+	if err != nil {
+		// Can't use the logger here, so using a panic
+		panic("failed to initialize logger: " + err.Error())
+	}
+
+	// Replace the global logger
+	zap.ReplaceGlobals(log)
+}
+
+// GetLogger returns the global logger instance
+func GetLogger() *zap.Logger {
+	return log
 }

@@ -3,7 +3,7 @@
 
 ### Variables
 @baseUrl = http://localhost:8081
-@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJleHAiOjE3NDYxNzA4MzMsImlhdCI6MTc0NjE2NzIzM30.djLVSx0yqiBfe95oA97bbQ0issbzHwgfdmv2n8D_zuI
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJleHAiOjE3NDYyNTk5MjQsImlhdCI6MTc0NjE3MzUyNH0.X4sz3iMKOf7s7BW1TfbK-Pd1DzKtZi3eRjl1vtbn988
 
 ### Register User
 # Creates a new user account
@@ -29,12 +29,12 @@ Content-Type: application/json
 
 ### Get Current User Profile
 # Retrieves the authenticated user's profile information
-GET {{baseUrl}}/auth/profile
+GET {{baseUrl}}/api/users/profile
 Authorization: Bearer {{authToken}}
 
 ### Update User Profile
 # Updates the authenticated user's profile information
-PATCH {{baseUrl}}/auth/profile
+PATCH {{baseUrl}}/api/users/profile
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
@@ -46,7 +46,7 @@ Content-Type: application/json
 
 ### Change Password
 # Updates the user's password
-POST {{baseUrl}}/auth/change-password
+POST {{baseUrl}}/api/users/change-password
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
@@ -57,7 +57,7 @@ Content-Type: application/json
 
 ### Select Tenant
 # Selects a tenant and returns a JWT token with tenant context
-POST {{baseUrl}}/auth/select-tenant
+POST {{baseUrl}}/api/tenant-auth/select
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
@@ -65,14 +65,23 @@ Content-Type: application/json
   "tenant_id": 1
 }
 
-### Login with Tenant Context
-# Authenticate with specific tenant context
-POST {{baseUrl}}/auth/login
+### Switch Tenant
+# Switches to a different tenant
+POST {{baseUrl}}/api/tenant-auth/switch
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "email": "user@example.com",
-  "password": "securepassword123",
+  "tenant_id": 1
+}
+
+### Set Default Tenant
+# Sets the default tenant for the user
+POST {{baseUrl}}/api/tenant-auth/default
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
   "tenant_id": 1
 }
 

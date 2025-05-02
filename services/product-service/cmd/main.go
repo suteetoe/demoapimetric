@@ -1,18 +1,19 @@
 package main
 
 import (
-	"os"
-	"strconv"
-	"time"
-
+	"net/http"
 	"product-service/internal/handler"
 	mid "product-service/internal/middleware"
+	"product-service/pkg/config"
 	"product-service/pkg/database"
-	applogger "product-service/pkg/logger"
+	"product-service/pkg/jwtutil"
+	"product-service/pkg/logger"
+	"product-service/prometheus"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
@@ -23,32 +24,39 @@ func main() {
 		// This allows the service to run in environments where env vars are set differently
 		// such as production environments with proper environment configuration
 		// The fallback values will be used in case env vars are not set
-		// GCiampan 2023-03-15
-		// log.Printf("Warning: .env file not found or error loading: %v\n", err)
+	}
+
+	// Load configuration
+	appConfig, err := config.Load()
+	if err != nil {
+		// Can't use structured logger yet since it's not initialized
+		panic("Failed to load configuration: " + err.Error())
 	}
 
 	// Initialize logger
-	zapLogger, _ := zap.NewProduction()
-	defer zapLogger.Sync()
-	log := zapLogger.Sugar()
+	logger.InitLogger(appConfig)
+	log := logger.GetLogger()
+	defer log.Sync()
+
+	log.Info("Starting product-service",
+		zap.String("environment", appConfig.Server.Env),
+		zap.String("port", appConfig.Server.Port))
+
+	// Initialize JWT utility
+	jwtutil.Initialize(&appConfig.JWT)
+	log.Info("JWT utility initialized")
+
+	// Initialize Prometheus metrics
+	prometheus.InitMetrics(appConfig)
+	log.Info("Prometheus metrics initialized",
+		zap.String("metrics_prefix", appConfig.Metrics.Prefix))
 
 	// Initialize database
-	dbDSN := os.Getenv("DB_DSN")
-	if dbDSN == "" {
-		dbDSN = "host=localhost user=postgres password=postgres dbname=product_db port=5432 sslmode=disable TimeZone=Asia/Bangkok"
-	}
-
-	dbConfig := database.DBConfig{
-		DSN:             dbDSN,
-		MaxIdleConns:    getEnvAsInt("DB_MAX_IDLE_CONNS", 10),
-		MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 30),
-		ConnMaxLifetime: getEnvAsDuration("DB_CONN_MAX_LIFETIME", time.Hour),
-	}
-
-	err := database.Initialize(dbConfig)
+	err = database.InitDB(appConfig)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		log.Fatal("Failed to initialize database", zap.Error(err))
 	}
+	log.Info("Database connection established")
 
 	// Initialize Echo instance
 	e := echo.New()
@@ -56,9 +64,17 @@ func main() {
 	// Middleware
 	e.Use(middleware.Recover())
 	e.Use(mid.RequestIDMiddleware)
-	e.Use(applogger.Middleware(zapLogger))
+	e.Use(mid.MetricsMiddleware)
 
 	// Routes
+	// Metrics endpoint
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
+
+	// Health check endpoint
+	e.GET("/health", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
+
 	// Legacy route
 	e.GET("/merchant/hello", handler.Hello)
 
@@ -79,35 +95,9 @@ func main() {
 	categoryAPI.DELETE("/:id", handler.DeleteCategory)
 
 	// Start server
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8082"
+	port := appConfig.Server.Port
+	log.Info("Starting server", zap.String("port", port))
+	if err := e.Start(":" + port); err != nil {
+		log.Fatal("Server error", zap.Error(err))
 	}
-
-	log.Infof("Starting product-service server on port %s", port)
-	e.Logger.Fatal(e.Start(":" + port))
-}
-
-// Helper functions to get environment variables with defaults
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if value, err := strconv.Atoi(valueStr); err == nil && valueStr != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if value, err := time.ParseDuration(valueStr); err == nil && valueStr != "" {
-		return value
-	}
-	return defaultValue
 }

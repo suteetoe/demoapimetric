@@ -6,7 +6,7 @@
 @authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJleHAiOjE3NDYxNzA4MzMsImlhdCI6MTc0NjE2NzIzM30.djLVSx0yqiBfe95oA97bbQ0issbzHwgfdmv2n8D_zuI
 
 ### Create a New Tenant
-POST {{baseUrl}}/tenants
+POST {{baseUrl}}/api/tenants
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
@@ -17,16 +17,16 @@ Content-Type: application/json
 }
 
 ### Get Tenant Details
-GET {{baseUrl}}/tenants/1
+GET {{baseUrl}}/api/tenants/1
 Authorization: Bearer {{authToken}}
 
 ### List All Tenants for Current User
-GET {{baseUrl}}/tenants
+GET {{baseUrl}}/api/tenants
 Authorization: Bearer {{authToken}}
 
 ### Switch to a Different Tenant
 # Changes the active tenant for the current user session
-POST {{baseUrl}}/tenants/switch
+POST {{baseUrl}}/api/tenant-auth/switch
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
@@ -36,7 +36,7 @@ Content-Type: application/json
 
 ### Set Default Tenant
 # Sets the default tenant for a user (used on subsequent logins)
-POST {{baseUrl}}/tenants/default
+POST {{baseUrl}}/api/tenant-auth/default
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
@@ -46,7 +46,7 @@ Content-Type: application/json
 
 ### Add User to Tenant
 # Grants a user access to a specific tenant with a defined role
-POST {{baseUrl}}/tenants/users
+POST {{baseUrl}}/api/tenants/users
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
@@ -58,10 +58,10 @@ Content-Type: application/json
 
 ### Remove User from Tenant
 # Revokes a user's access to a specific tenant
-DELETE {{baseUrl}}/tenants/1/users/2
+DELETE {{baseUrl}}/api/tenants/1/users/2
 Authorization: Bearer {{authToken}}
 
 ### List Users in Tenant
 # Gets all users with access to a specific tenant
-GET {{baseUrl}}/tenants/1/users
+GET {{baseUrl}}/api/tenants/1/users
 Authorization: Bearer {{authToken}}

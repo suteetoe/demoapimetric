@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"product-service/pkg/jwtutil"
 	"product-service/pkg/logger"
+	"product-service/prometheus"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -15,10 +16,14 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		log := logger.FromContext(c)
 
+		// Increment auth attempts counter
+		prometheus.AuthAttemptsCounter.Inc()
+
 		// Get the Authorization header
 		authHeader := c.Request().Header.Get("Authorization")
 		if authHeader == "" {
 			log.Warn("Missing Authorization header")
+			prometheus.AuthErrorsCounter.Inc()
 			return c.JSON(http.StatusUnauthorized, echo.Map{"error": "missing authorization token"})
 		}
 
@@ -26,6 +31,7 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
 			log.Warn("Invalid Authorization header format")
+			prometheus.AuthErrorsCounter.Inc()
 			return c.JSON(http.StatusUnauthorized, echo.Map{"error": "invalid authorization format, expected Bearer token"})
 		}
 
@@ -36,6 +42,7 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		claims, err := jwtutil.ValidateToken(tokenString)
 		if err != nil {
 			log.Error("Invalid JWT token", zap.Error(err))
+			prometheus.AuthErrorsCounter.Inc()
 			return c.JSON(http.StatusUnauthorized, echo.Map{"error": "invalid or expired token"})
 		}
 
@@ -48,14 +55,25 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			c.Set("tenant_id", *claims.TenantID)
 			c.Set("tenant_name", claims.TenantName)
 			c.Set("user_role", claims.Role)
-			log.Info("Request authenticated with tenant context",
+
+			// Add tenant info to logger context
+			log = log.With(
 				zap.Uint("tenant_id", *claims.TenantID),
 				zap.String("tenant_name", claims.TenantName),
-				zap.String("role", claims.Role))
+				zap.String("role", claims.Role),
+			)
+			c.Set("logger", log)
+
+			log.Info("Request authenticated with tenant context")
 		} else {
 			log.Warn("JWT token does not contain tenant_id")
+			prometheus.TenantContextMissingCounter.Inc()
+			prometheus.AuthErrorsCounter.Inc()
 			return c.JSON(http.StatusBadRequest, echo.Map{"error": "tenant_id is required in the token"})
 		}
+
+		// Increment auth success counter
+		prometheus.AuthSuccessCounter.Inc()
 
 		// Token is valid, proceed with the request
 		return next(c)
