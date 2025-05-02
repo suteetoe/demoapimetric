@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Login authenticates a user and returns a JWT token without tenant information
 func Login(c echo.Context) error {
 	log := logger.FromContext(c)
 	prometheus.LoginCounter.Inc()
@@ -22,7 +23,6 @@ func Login(c echo.Context) error {
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
-		TenantID *uint  `json:"tenant_id,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -31,112 +31,69 @@ func Login(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
 	}
 
-	// Find user in database - track DB operation duration
+	// Validate required fields
+	if req.Email == "" || req.Password == "" {
+		log.Error("Missing credentials")
+		prometheus.RecordAuthError("missing_credentials")
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "email and password are required"})
+	}
+
+	// Track DB operations
 	defer prometheus.TrackDBOperation("query")(time.Now())
+
+	// Find user by email
 	var user model.User
-	result := database.GetDB().Where("email = ?", req.Email).First(&user)
-	if result.Error != nil {
-		log.Error("User not found", zap.String("email", req.Email))
+	if result := database.GetDB().Where("email = ?", req.Email).First(&user); result.Error != nil {
+		log.Warn("Login attempt with non-existent email", zap.String("email", req.Email))
 		prometheus.RecordAuthError("user_not_found")
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "invalid credentials"})
 	}
 
-	// Verify password
-	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
-	if err != nil {
-		log.Error("Invalid password", zap.String("email", req.Email))
+	// Check password
+	if !checkPasswordHash(req.Password, user.Password) {
+		log.Warn("Login attempt with incorrect password", zap.String("email", req.Email))
 		prometheus.RecordAuthError("invalid_password")
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "invalid credentials"})
 	}
 
-	// Handle tenant selection logic
-	var selectedTenantID *uint
-	var tenantName string
-	var userRole string
-
-	if req.TenantID != nil {
-		// If tenant ID is provided, verify the user has access to this tenant
-		var userTenant model.UserTenant
-		result := database.GetDB().Where("user_id = ? AND tenant_id = ? AND active = ?", user.ID, *req.TenantID, true).First(&userTenant)
-		if result.Error != nil {
-			log.Error("User does not have access to the specified tenant",
-				zap.String("email", req.Email),
-				zap.Uint("tenant_id", *req.TenantID))
-			prometheus.RecordAuthError("tenant_access_denied")
-			return c.JSON(http.StatusForbidden, echo.Map{"error": "access denied to the specified tenant"})
-		}
-
-		// Get tenant name
-		var tenant model.Tenant
-		if result := database.GetDB().Select("name").First(&tenant, *req.TenantID); result.Error == nil {
-			tenantName = tenant.Name
-		}
-
-		selectedTenantID = req.TenantID
-		userRole = userTenant.Role
-	} else if user.TenantID != nil {
-		// Use the user's default tenant if available
-		selectedTenantID = user.TenantID
-
-		// Get tenant name and user role
-		var tenant model.Tenant
-		if result := database.GetDB().Select("name").First(&tenant, *user.TenantID); result.Error == nil {
-			tenantName = tenant.Name
-		}
-
-		var userTenant model.UserTenant
-		if result := database.GetDB().Select("role").Where("user_id = ? AND tenant_id = ?", user.ID, *user.TenantID).First(&userTenant); result.Error == nil {
-			userRole = userTenant.Role
-		}
-	}
-
-	// Generate JWT token with tenant information if available
-	var token string
-	if selectedTenantID != nil {
-		token, err = jwtutil.GenerateTokenWithTenant(user.Email, user.ID, selectedTenantID, tenantName, userRole)
-	} else {
-		token, err = jwtutil.GenerateToken(user.Email, user.ID)
-	}
-
+	// Generate JWT token without tenant information
+	token, err := jwtutil.GenerateToken(user.Email, user.ID)
 	if err != nil {
 		log.Error("Failed to generate token", zap.Error(err))
 		prometheus.RecordAuthError("token_generation_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "token error"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "authentication error"})
 	}
 
 	// Increment active tokens gauge
 	prometheus.IncreaseActiveTokens()
 
-	// Log with tenant information if available
-	if selectedTenantID != nil {
-		log.Info("User logged in with tenant context",
-			zap.String("email", user.Email),
-			zap.Uint("tenant_id", *selectedTenantID),
-			zap.String("tenant_name", tenantName),
-			zap.String("role", userRole))
-	} else {
-		log.Info("User logged in",
-			zap.String("email", user.Email))
+	// Fetch available tenants for the user
+	var userTenants []model.UserTenant
+	if result := database.GetDB().Preload("Tenant").Where("user_id = ? AND active = ?", user.ID, true).Find(&userTenants); result.Error != nil {
+		log.Error("Failed to fetch user tenants", zap.Error(result.Error))
+		// We still continue, just won't return tenant info
 	}
 
-	// Build response with tenant info if available
-	response := echo.Map{
-		"token": token,
-		"user": map[string]interface{}{
-			"id":    user.ID,
-			"email": user.Email,
-		},
+	// Format tenant information
+	tenants := []map[string]interface{}{}
+	for _, ut := range userTenants {
+		tenants = append(tenants, map[string]interface{}{
+			"id":   ut.TenantID,
+			"name": ut.Tenant.Name,
+			"role": ut.Role,
+		})
 	}
 
-	if selectedTenantID != nil {
-		response["tenant"] = map[string]interface{}{
-			"id":   *selectedTenantID,
-			"name": tenantName,
-			"role": userRole,
-		}
-	}
+	log.Info("User logged in successfully",
+		zap.String("email", req.Email),
+		zap.Uint("id", user.ID))
 
-	return c.JSON(http.StatusOK, response)
+	return c.JSON(http.StatusOK, echo.Map{
+		"token":   token,
+		"user_id": user.ID,
+		"email":   user.Email,
+		"tenants": tenants,
+	})
 }
 
 func Register(c echo.Context) error {
@@ -205,6 +162,203 @@ func Register(c echo.Context) error {
 	})
 }
 
+// GetProfile retrieves the authenticated user's profile information
+func GetProfile(c echo.Context) error {
+	log := logger.FromContext(c)
+	prometheus.RecordAuthOperation("profile_access")
+
+	// Get user ID from context (set by AuthMiddleware)
+	userID, ok := c.Get("user_id").(uint)
+	if !ok {
+		log.Error("Failed to get user ID from context")
+		prometheus.RecordAuthError("unauthorized_profile_access")
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
+	}
+
+	// Track DB operations
+	defer prometheus.TrackDBOperation("query")(time.Now())
+
+	// Find user by ID
+	var user model.User
+	if result := database.GetDB().First(&user, userID); result.Error != nil {
+		log.Error("Failed to retrieve user profile", zap.Error(result.Error))
+		prometheus.RecordAuthError("profile_retrieval_failed")
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to retrieve profile"})
+	}
+
+	// Return user profile (password is excluded via JSON tag in model)
+	log.Info("Profile accessed", zap.Uint("user_id", userID))
+	return c.JSON(http.StatusOK, echo.Map{
+		"id":           user.ID,
+		"email":        user.Email,
+		"first_name":   user.FirstName,
+		"last_name":    user.LastName,
+		"phone_number": user.PhoneNumber,
+		"created_at":   user.CreatedAt,
+		"updated_at":   user.UpdatedAt,
+	})
+}
+
+// UpdateProfile updates the authenticated user's profile information
+func UpdateProfile(c echo.Context) error {
+	log := logger.FromContext(c)
+	prometheus.RecordAuthOperation("profile_update")
+
+	// Get user ID from context (set by AuthMiddleware)
+	userID, ok := c.Get("user_id").(uint)
+	if !ok {
+		log.Error("Failed to get user ID from context")
+		prometheus.RecordAuthError("unauthorized_profile_update")
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
+	}
+
+	// Parse request
+	var req struct {
+		FirstName   string `json:"first_name"`
+		LastName    string `json:"last_name"`
+		PhoneNumber string `json:"phone_number"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		log.Error("Failed to parse profile update request", zap.Error(err))
+		prometheus.RecordAuthError("invalid_request")
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
+	}
+
+	// Track DB operations
+	defer prometheus.TrackDBOperation("update")(time.Now())
+
+	// Find user by ID
+	var user model.User
+	if result := database.GetDB().First(&user, userID); result.Error != nil {
+		log.Error("Failed to retrieve user for update", zap.Error(result.Error))
+		prometheus.RecordAuthError("profile_update_failed")
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update profile"})
+	}
+
+	// Update user profile fields
+	changes := false
+
+	if req.FirstName != "" && req.FirstName != user.FirstName {
+		user.FirstName = req.FirstName
+		changes = true
+	}
+
+	if req.LastName != "" && req.LastName != user.LastName {
+		user.LastName = req.LastName
+		changes = true
+	}
+
+	if req.PhoneNumber != "" && req.PhoneNumber != user.PhoneNumber {
+		user.PhoneNumber = req.PhoneNumber
+		changes = true
+	}
+
+	if !changes {
+		log.Info("No changes to update in profile")
+		return c.JSON(http.StatusOK, echo.Map{
+			"message": "No changes to update",
+			"user": echo.Map{
+				"id":           user.ID,
+				"email":        user.Email,
+				"first_name":   user.FirstName,
+				"last_name":    user.LastName,
+				"phone_number": user.PhoneNumber,
+			},
+		})
+	}
+
+	// Save updated user profile
+	if result := database.GetDB().Save(&user); result.Error != nil {
+		log.Error("Failed to update profile", zap.Error(result.Error))
+		prometheus.RecordAuthError("profile_save_failed")
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to save profile updates"})
+	}
+
+	log.Info("Profile updated successfully", zap.Uint("user_id", userID))
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "Profile updated successfully",
+		"user": echo.Map{
+			"id":           user.ID,
+			"email":        user.Email,
+			"first_name":   user.FirstName,
+			"last_name":    user.LastName,
+			"phone_number": user.PhoneNumber,
+		},
+	})
+}
+
+// ChangePassword updates the user's password
+func ChangePassword(c echo.Context) error {
+	log := logger.FromContext(c)
+	prometheus.RecordAuthOperation("password_change")
+
+	// Get user ID from context (set by AuthMiddleware)
+	userID, ok := c.Get("user_id").(uint)
+	if !ok {
+		log.Error("Failed to get user ID from context")
+		prometheus.RecordAuthError("unauthorized_password_change")
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
+	}
+
+	// Parse request
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		log.Error("Failed to parse password change request", zap.Error(err))
+		prometheus.RecordAuthError("invalid_request")
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
+	}
+
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		log.Error("Missing password data")
+		prometheus.RecordAuthError("incomplete_password_change")
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "current and new password are required"})
+	}
+
+	// Track DB operations
+	defer prometheus.TrackDBOperation("update")(time.Now())
+
+	// Find user by ID
+	var user model.User
+	if result := database.GetDB().First(&user, userID); result.Error != nil {
+		log.Error("Failed to retrieve user for password change", zap.Error(result.Error))
+		prometheus.RecordAuthError("user_not_found")
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update password"})
+	}
+
+	// Verify current password
+	if !checkPasswordHash(req.CurrentPassword, user.Password) {
+		log.Warn("Invalid current password", zap.Uint("user_id", userID))
+		prometheus.RecordAuthError("invalid_current_password")
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "current password is incorrect"})
+	}
+
+	// Hash new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Error("Failed to hash new password", zap.Error(err))
+		prometheus.RecordAuthError("password_hash_failed")
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to process new password"})
+	}
+
+	// Update password
+	user.Password = string(hashedPassword)
+	if result := database.GetDB().Save(&user); result.Error != nil {
+		log.Error("Failed to save new password", zap.Error(result.Error))
+		prometheus.RecordAuthError("password_update_failed")
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update password"})
+	}
+
+	log.Info("Password changed successfully", zap.Uint("user_id", userID))
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "Password updated successfully",
+	})
+}
+
 func MetricsHandler(c echo.Context) error {
 	handler := prometheus.GetPrometheusHandler()
 	handler.ServeHTTP(c.Response(), c.Request())
@@ -217,4 +371,10 @@ func nilSafeUint(val *uint) uint {
 		return 0
 	}
 	return *val
+}
+
+// Helper function to check password hash
+func checkPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }

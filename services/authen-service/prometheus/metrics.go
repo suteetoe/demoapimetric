@@ -28,6 +28,14 @@ var (
 		},
 	)
 
+	// Tenant selection counter
+	TenantSelectionCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "auth_tenant_selection_total",
+			Help: "Total number of tenant selections after login",
+		},
+	)
+
 	// Tenant operation counter
 	TenantOperationCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -62,6 +70,15 @@ var (
 			Help: "Total number of tenant-related errors",
 		},
 		[]string{"tenant_id", "error_type"}, // Track errors by tenant
+	)
+
+	// Auth operation counter
+	AuthOperationCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "auth_operations_total",
+			Help: "Total number of authentication operations",
+		},
+		[]string{"operation"}, // operation can be "profile_access", "profile_update", "password_change", etc.
 	)
 )
 
@@ -139,10 +156,12 @@ func init() {
 	// Register counters
 	prometheus.MustRegister(LoginCounter)
 	prometheus.MustRegister(RegisterCounter)
+	prometheus.MustRegister(TenantSelectionCounter)
 	prometheus.MustRegister(TenantOperationCounter)
 	prometheus.MustRegister(HTTPRequestCounter)
 	prometheus.MustRegister(AuthErrorCounter)
 	prometheus.MustRegister(TenantErrorCounter)
+	prometheus.MustRegister(AuthOperationCounter)
 
 	// Register histograms
 	prometheus.MustRegister(RequestDuration)
@@ -246,6 +265,11 @@ func RecordTenantError(tenantID uint, errorType string) {
 // RecordTenantOperation records a tenant operation
 func RecordTenantOperation(operation string) {
 	TenantOperationCounter.With(prometheus.Labels{"operation": operation}).Inc()
+}
+
+// RecordAuthOperation records an authentication operation by type
+func RecordAuthOperation(operation string) {
+	AuthOperationCounter.With(prometheus.Labels{"operation": operation}).Inc()
 }
 
 // UpdateActiveTenants updates the active tenants gauge

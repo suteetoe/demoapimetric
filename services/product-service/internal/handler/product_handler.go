@@ -19,6 +19,7 @@ type ProductRequest struct {
 	Price       float64 `json:"price" validate:"required,gt=0"`
 	Stock       int     `json:"stock"`
 	CategoryID  uint    `json:"category_id"`
+	TenantID    uint    `json:"tenant_id" validate:"required"`
 	IsActive    bool    `json:"is_active"`
 }
 
@@ -30,8 +31,18 @@ func ListProducts(c echo.Context) error {
 	db := database.GetDB()
 	var products []model.Product
 
+	// Extract tenant ID from context (set by auth middleware)
+	tenantID, ok := c.Get("tenant_id").(uint)
+	if !ok {
+		log.Warn("Missing tenant_id in context")
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error": "tenant_id is required",
+		})
+	}
+
 	// Handle query parameters for filtering
-	query := db
+	query := db.Where("tenant_id = ?", tenantID)
+	log.Info("Filtering products by tenant", zap.Uint("tenant_id", tenantID))
 
 	// Filter by active status if specified
 	isActive := c.QueryParam("is_active")
@@ -62,7 +73,9 @@ func ListProducts(c echo.Context) error {
 		})
 	}
 
-	log.Info("Products retrieved successfully", zap.Int("count", len(products)))
+	log.Info("Products retrieved successfully",
+		zap.Int("count", len(products)),
+		zap.Uint("tenant_id", tenantID))
 	return c.JSON(http.StatusOK, products)
 }
 
@@ -70,13 +83,26 @@ func ListProducts(c echo.Context) error {
 func GetProduct(c echo.Context) error {
 	log := logger.FromContext(c)
 	id := c.Param("id")
-	log.Info("Getting product by ID", zap.String("product_id", id))
+
+	// Extract tenant ID from context (set by auth middleware)
+	tenantID, ok := c.Get("tenant_id").(uint)
+	if !ok {
+		log.Warn("Missing tenant_id in context")
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error": "tenant_id is required",
+		})
+	}
+
+	log.Info("Getting product by ID",
+		zap.String("product_id", id),
+		zap.Uint("tenant_id", tenantID))
 
 	var product model.Product
-	result := database.GetDB().First(&product, id)
+	result := database.GetDB().Where("id = ? AND tenant_id = ?", id, tenantID).First(&product)
 	if result.Error != nil {
-		log.Error("Product not found",
+		log.Error("Product not found or does not belong to tenant",
 			zap.String("product_id", id),
+			zap.Uint("tenant_id", tenantID),
 			zap.Error(result.Error))
 		return c.JSON(http.StatusNotFound, echo.Map{
 			"error": "Product not found",
@@ -86,7 +112,8 @@ func GetProduct(c echo.Context) error {
 	log.Info("Product retrieved successfully",
 		zap.String("product_id", id),
 		zap.String("product_name", product.Name),
-		zap.String("product_sku", product.SKU))
+		zap.String("product_sku", product.SKU),
+		zap.Uint("tenant_id", product.TenantID))
 	return c.JSON(http.StatusOK, product)
 }
 
@@ -103,19 +130,37 @@ func CreateProduct(c echo.Context) error {
 		})
 	}
 
+	// Extract tenant ID from context (set by auth middleware)
+	tenantID, ok := c.Get("tenant_id").(uint)
+	if !ok {
+		log.Warn("Missing tenant_id in context")
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error": "tenant_id is required",
+		})
+	}
+
+	// Override the tenant ID in the request with the one from the JWT token
+	// This ensures users can't create products for other tenants
+	req.TenantID = tenantID
+
 	log.Info("Product creation request",
 		zap.String("name", req.Name),
 		zap.String("sku", req.SKU),
 		zap.Float64("price", req.Price),
-		zap.Uint("category_id", req.CategoryID))
+		zap.Uint("category_id", req.CategoryID),
+		zap.Uint("tenant_id", req.TenantID))
 
-	// Check if product with SKU already exists
+	// Check if product with SKU already exists for this tenant
 	var count int64
-	database.GetDB().Model(&model.Product{}).Where("sku = ?", req.SKU).Count(&count)
+	database.GetDB().Model(&model.Product{}).
+		Where("sku = ? AND tenant_id = ?", req.SKU, req.TenantID).
+		Count(&count)
 	if count > 0 {
-		log.Warn("Product with this SKU already exists", zap.String("sku", req.SKU))
+		log.Warn("Product with this SKU already exists for this tenant",
+			zap.String("sku", req.SKU),
+			zap.Uint("tenant_id", req.TenantID))
 		return c.JSON(http.StatusConflict, echo.Map{
-			"error": "Product with this SKU already exists",
+			"error": "Product with this SKU already exists for this tenant",
 		})
 	}
 
@@ -127,6 +172,7 @@ func CreateProduct(c echo.Context) error {
 		Price:       req.Price,
 		Stock:       req.Stock,
 		CategoryID:  req.CategoryID,
+		TenantID:    req.TenantID,
 		IsActive:    req.IsActive,
 	}
 
@@ -135,6 +181,7 @@ func CreateProduct(c echo.Context) error {
 		log.Error("Failed to create product",
 			zap.String("name", req.Name),
 			zap.String("sku", req.SKU),
+			zap.Uint("tenant_id", req.TenantID),
 			zap.Error(result.Error))
 		return c.JSON(http.StatusInternalServerError, echo.Map{
 			"error": "Failed to create product",
@@ -144,7 +191,8 @@ func CreateProduct(c echo.Context) error {
 	log.Info("Product created successfully",
 		zap.String("product_id", strconv.FormatUint(uint64(product.ID), 10)),
 		zap.String("name", product.Name),
-		zap.String("sku", product.SKU))
+		zap.String("sku", product.SKU),
+		zap.Uint("tenant_id", product.TenantID))
 	return c.JSON(http.StatusCreated, product)
 }
 
@@ -164,9 +212,22 @@ func UpdateProduct(c echo.Context) error {
 		})
 	}
 
-	// Find existing product
+	// Extract tenant ID from context (set by auth middleware)
+	tenantID, ok := c.Get("tenant_id").(uint)
+	if !ok {
+		log.Warn("Missing tenant_id in context")
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error": "tenant_id is required",
+		})
+	}
+
+	// Override the tenant ID in the request with the one from the JWT token
+	// This ensures users can't update products for other tenants
+	req.TenantID = tenantID
+
+	// Find existing product and validate tenant ownership
 	var product model.Product
-	result := database.GetDB().First(&product, id)
+	result := database.GetDB().Where("id = ?", id).First(&product)
 	if result.Error != nil {
 		log.Error("Product not found for update",
 			zap.String("product_id", id),
@@ -176,10 +237,21 @@ func UpdateProduct(c echo.Context) error {
 		})
 	}
 
+	// Ensure product belongs to the tenant in JWT token
+	if product.TenantID != tenantID {
+		log.Warn("Unauthorized attempt to update product from different tenant",
+			zap.String("product_id", id),
+			zap.Uint("product_tenant", product.TenantID),
+			zap.Uint("request_tenant", tenantID))
+		return c.JSON(http.StatusForbidden, echo.Map{
+			"error": "You don't have permission to update this product",
+		})
+	}
+
 	oldSKU := product.SKU
 	oldPrice := product.Price
 
-	// Check if SKU is changed and if new SKU already exists
+	// Check if SKU is changed and if new SKU already exists within the same tenant
 	if req.SKU != product.SKU {
 		log.Info("Product SKU change requested",
 			zap.String("product_id", id),
@@ -187,12 +259,15 @@ func UpdateProduct(c echo.Context) error {
 			zap.String("new_sku", req.SKU))
 
 		var count int64
-		database.GetDB().Model(&model.Product{}).Where("sku = ? AND id != ?", req.SKU, id).Count(&count)
+		database.GetDB().Model(&model.Product{}).
+			Where("sku = ? AND id != ? AND tenant_id = ?", req.SKU, id, tenantID).
+			Count(&count)
 		if count > 0 {
-			log.Warn("Product with this SKU already exists",
-				zap.String("sku", req.SKU))
+			log.Warn("Product with this SKU already exists for this tenant",
+				zap.String("sku", req.SKU),
+				zap.Uint("tenant_id", tenantID))
 			return c.JSON(http.StatusConflict, echo.Map{
-				"error": "Product with this SKU already exists",
+				"error": "Product with this SKU already exists for this tenant",
 			})
 		}
 	}
@@ -205,6 +280,7 @@ func UpdateProduct(c echo.Context) error {
 	product.Stock = req.Stock
 	product.CategoryID = req.CategoryID
 	product.IsActive = req.IsActive
+	// TenantID remains unchanged - can't change tenant ownership
 
 	result = database.GetDB().Save(&product)
 	if result.Error != nil {
@@ -222,7 +298,8 @@ func UpdateProduct(c echo.Context) error {
 		zap.String("old_sku", oldSKU),
 		zap.String("new_sku", product.SKU),
 		zap.Float64("old_price", oldPrice),
-		zap.Float64("new_price", product.Price))
+		zap.Float64("new_price", product.Price),
+		zap.Uint("tenant_id", product.TenantID))
 	return c.JSON(http.StatusOK, product)
 }
 
@@ -230,38 +307,54 @@ func UpdateProduct(c echo.Context) error {
 func DeleteProduct(c echo.Context) error {
 	log := logger.FromContext(c)
 	id := c.Param("id")
-	log.Info("Deleting product", zap.String("product_id", id))
 
-	// Get product details before deleting
-	var product model.Product
-	preResult := database.GetDB().First(&product, id)
-	if preResult.Error == nil {
-		log.Info("Found product to delete",
-			zap.String("product_id", id),
-			zap.String("name", product.Name),
-			zap.String("sku", product.SKU))
+	// Extract tenant ID from context (set by auth middleware)
+	tenantID, ok := c.Get("tenant_id").(uint)
+	if !ok {
+		log.Warn("Missing tenant_id in context")
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error": "tenant_id is required",
+		})
 	}
 
-	result := database.GetDB().Delete(&model.Product{}, id)
+	log.Info("Deleting product",
+		zap.String("product_id", id),
+		zap.Uint("tenant_id", tenantID))
+
+	// Get product details before deleting and verify tenant ownership
+	var product model.Product
+	preResult := database.GetDB().Where("id = ? AND tenant_id = ?", id, tenantID).First(&product)
+	if preResult.Error != nil {
+		log.Warn("Product not found or does not belong to tenant",
+			zap.String("product_id", id),
+			zap.Uint("tenant_id", tenantID),
+			zap.Error(preResult.Error))
+		return c.JSON(http.StatusNotFound, echo.Map{
+			"error": "Product not found",
+		})
+	}
+
+	log.Info("Found product to delete",
+		zap.String("product_id", id),
+		zap.String("name", product.Name),
+		zap.String("sku", product.SKU),
+		zap.Uint("tenant_id", product.TenantID))
+
+	// Proceed with deletion
+	result := database.GetDB().Delete(&product)
 	if result.Error != nil {
 		log.Error("Failed to delete product",
 			zap.String("product_id", id),
+			zap.Uint("tenant_id", product.TenantID),
 			zap.Error(result.Error))
 		return c.JSON(http.StatusInternalServerError, echo.Map{
 			"error": "Failed to delete product",
 		})
 	}
 
-	if result.RowsAffected == 0 {
-		log.Warn("Product not found for deletion",
-			zap.String("product_id", id))
-		return c.JSON(http.StatusNotFound, echo.Map{
-			"error": "Product not found",
-		})
-	}
-
 	log.Info("Product deleted successfully",
 		zap.String("product_id", id),
+		zap.Uint("tenant_id", product.TenantID),
 		zap.Int64("rows_affected", result.RowsAffected))
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "Product deleted successfully",

@@ -1,9 +1,13 @@
 # Tenant Service Endpoints
+# Last updated: May 2, 2025
+
+### Variables
+@baseUrl = http://localhost:8081
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJleHAiOjE3NDYxNzA4MzMsImlhdCI6MTc0NjE2NzIzM30.djLVSx0yqiBfe95oA97bbQ0issbzHwgfdmv2n8D_zuI
 
 ### Create a New Tenant
-POST /tenants HTTP/1.1
-Host: localhost:8081
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJleHAiOjE3NDYxNTc2MTYsImlhdCI6MTc0NjE1NDAxNn0.U8ZnjV--XwP4U_t88d2XehJdJaf1hxUFhH_-VVxXlW0
+POST {{baseUrl}}/tenants
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
@@ -13,19 +17,17 @@ Content-Type: application/json
 }
 
 ### Get Tenant Details
-GET /tenants/1 HTTP/1.1
-Host: localhost:8081
-Authorization: Bearer your_jwt_token_here
+GET {{baseUrl}}/tenants/1
+Authorization: Bearer {{authToken}}
 
 ### List All Tenants for Current User
-GET /tenants HTTP/1.1
-Host: localhost:8081
-Authorization: Bearer your_jwt_token_here
+GET {{baseUrl}}/tenants
+Authorization: Bearer {{authToken}}
 
 ### Switch to a Different Tenant
-POST /tenants/switch HTTP/1.1
-Host: localhost:8081
-Authorization: Bearer your_jwt_token_here
+# Changes the active tenant for the current user session
+POST {{baseUrl}}/tenants/switch
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
@@ -33,9 +35,9 @@ Content-Type: application/json
 }
 
 ### Set Default Tenant
-POST /tenants/default HTTP/1.1
-Host: localhost:8081
-Authorization: Bearer your_jwt_token_here
+# Sets the default tenant for a user (used on subsequent logins)
+POST {{baseUrl}}/tenants/default
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
@@ -43,9 +45,9 @@ Content-Type: application/json
 }
 
 ### Add User to Tenant
-POST /tenants/users HTTP/1.1
-Host: localhost:8081
-Authorization: Bearer your_jwt_token_here
+# Grants a user access to a specific tenant with a defined role
+POST {{baseUrl}}/tenants/users
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
@@ -55,17 +57,11 @@ Content-Type: application/json
 }
 
 ### Remove User from Tenant
-DELETE /tenants/1/users/2 HTTP/1.1
-Host: localhost:8081
-Authorization: Bearer your_jwt_token_here
+# Revokes a user's access to a specific tenant
+DELETE {{baseUrl}}/tenants/1/users/2
+Authorization: Bearer {{authToken}}
 
-### Login with Tenant Context
-POST /auth/login HTTP/1.1
-Host: localhost:8081
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "password": "securepassword123",
-  "tenant_id": 1
-}
+### List Users in Tenant
+# Gets all users with access to a specific tenant
+GET {{baseUrl}}/tenants/1/users
+Authorization: Bearer {{authToken}}

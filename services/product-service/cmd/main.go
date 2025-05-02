@@ -62,16 +62,16 @@ func main() {
 	// Legacy route
 	e.GET("/merchant/hello", handler.Hello)
 
-	// Product API routes
-	productAPI := e.Group("/api/products")
+	// Product API routes - Apply auth middleware to validate JWT and extract tenant ID
+	productAPI := e.Group("/api/products", mid.AuthMiddleware)
 	productAPI.GET("", handler.ListProducts)
 	productAPI.GET("/:id", handler.GetProduct)
 	productAPI.POST("", handler.CreateProduct)
 	productAPI.PUT("/:id", handler.UpdateProduct)
 	productAPI.DELETE("/:id", handler.DeleteProduct)
 
-	// Category API routes
-	categoryAPI := e.Group("/api/categories")
+	// Category API routes - Apply auth middleware to validate JWT and extract tenant ID
+	categoryAPI := e.Group("/api/categories", mid.AuthMiddleware)
 	categoryAPI.GET("", handler.ListCategories)
 	categoryAPI.GET("/:id", handler.GetCategory)
 	categoryAPI.POST("", handler.CreateCategory)

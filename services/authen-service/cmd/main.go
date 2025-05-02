@@ -56,6 +56,9 @@ func main() {
 	e.POST("/auth/register", handler.Register)
 	e.GET("/metrics", handler.MetricsHandler)
 
+	// Tenant selection after login (requires token but no tenant)
+	e.POST("/auth/select-tenant", handler.SelectTenant)
+
 	// Secure group - all endpoints require authentication
 	secured := e.Group("")
 	secured.Use(middleware.AuthMiddleware)
@@ -70,6 +73,11 @@ func main() {
 	// Tenant user management
 	secured.POST("/tenants/users", handler.AddUserToTenant)
 	secured.DELETE("/tenants/:tenant_id/users/:user_id", handler.RemoveUserFromTenant)
+
+	// User profile endpoints
+	secured.GET("/auth/profile", handler.GetProfile)
+	secured.PATCH("/auth/profile", handler.UpdateProfile)
+	secured.POST("/auth/change-password", handler.ChangePassword)
 
 	// Get server port from environment variable
 	port := getEnv("SERVER_PORT", "8081")

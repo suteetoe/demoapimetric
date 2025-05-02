@@ -90,14 +90,6 @@ func CreateTenant(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "tenant association failed"})
 	}
 
-	// Update user's default tenant
-	if result := tx.Model(&model.User{}).Where("id = ?", userID).Update("tenant_id", tenant.ID); result.Error != nil {
-		tx.Rollback()
-		log.Error("Failed to update user's default tenant", zap.Error(result.Error))
-		prometheus.RecordAuthError("user_update_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "user update failed"})
-	}
-
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
 		log.Error("Failed to commit transaction", zap.Error(err))
@@ -479,21 +471,12 @@ func RemoveUserFromTenant(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, echo.Map{"error": "user not found in this tenant"})
 	}
 
-	// If the removed user had this as their default tenant, reset their default tenant
-	var user model.User
-	if result := database.GetDB().First(&user, targetUserID); result.Error == nil {
-		if user.TenantID != nil && *user.TenantID == uint(tenantID) {
-			// Find another tenant for this user
-			var anotherTenant model.UserTenant
-			if result := database.GetDB().Where("user_id = ? AND tenant_id != ?", targetUserID, tenantID).First(&anotherTenant); result.Error == nil {
-				// Update the user's default tenant
-				database.GetDB().Model(&user).Update("tenant_id", anotherTenant.TenantID)
-			} else {
-				// No other tenant, set to nil
-				database.GetDB().Model(&user).Update("tenant_id", nil)
-			}
-		}
-	}
+	// Update default tenant status if needed
+	database.GetDB().Model(&model.UserTenant{}).
+		Where("user_id = ?", targetUserID).
+		Order("created_at asc").
+		Limit(1).
+		Update("is_default", true)
 
 	log.Info("Removed user from tenant",
 		zap.Uint64("tenant_id", tenantID),
@@ -574,14 +557,6 @@ func SetDefaultTenant(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to set default tenant"})
 	}
 
-	// Update user's default tenant ID
-	if err := tx.Model(&model.User{}).Where("id = ?", userID).Update("tenant_id", req.TenantID).Error; err != nil {
-		tx.Rollback()
-		log.Error("Failed to update user's default tenant ID", zap.Error(err))
-		prometheus.RecordAuthError("user_update_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update user"})
-	}
-
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
 		log.Error("Failed to commit transaction", zap.Error(err))
@@ -596,5 +571,72 @@ func SetDefaultTenant(c echo.Context) error {
 	return c.JSON(http.StatusOK, echo.Map{
 		"message":   "Default tenant set successfully",
 		"tenant_id": req.TenantID,
+	})
+}
+
+// SelectTenant allows a user to select a tenant and receive a new JWT token with tenant information
+func SelectTenant(c echo.Context) error {
+	log := logger.FromContext(c)
+	prometheus.TenantSelectionCounter.Inc()
+
+	// Parse request
+	var req struct {
+		TenantID uint `json:"tenant_id"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		log.Error("Failed to parse tenant selection request", zap.Error(err))
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
+	}
+
+	// Get token from Authorization header
+	tokenString := c.Request().Header.Get("Authorization")
+	if tokenString == "" {
+		log.Error("Missing token")
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
+	}
+
+	// Remove "Bearer " prefix if present
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Validate the token
+	claims, err := jwtutil.ValidateToken(tokenString)
+	if err != nil {
+		log.Error("Invalid token", zap.Error(err))
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "invalid token"})
+	}
+
+	// Track DB operations
+	defer prometheus.TrackDBOperation("query")(time.Now())
+
+	// Verify user has access to the specified tenant
+	var userTenant model.UserTenant
+	if result := database.GetDB().Preload("Tenant").Where("user_id = ? AND tenant_id = ? AND active = ?", claims.UserID, req.TenantID, true).First(&userTenant); result.Error != nil {
+		log.Warn("Tenant selection attempt for unauthorized tenant",
+			zap.Uint("user_id", claims.UserID),
+			zap.Uint("tenant_id", req.TenantID))
+		return c.JSON(http.StatusForbidden, echo.Map{"error": "access denied to the specified tenant"})
+	}
+
+	// Generate new JWT token with tenant information
+	token, err := jwtutil.GenerateTokenWithTenant(claims.Email, claims.UserID, &req.TenantID, userTenant.Tenant.Name, userTenant.Role)
+	if err != nil {
+		log.Error("Failed to generate token with tenant", zap.Error(err))
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "token generation failed"})
+	}
+
+	log.Info("User selected tenant",
+		zap.Uint("user_id", claims.UserID),
+		zap.Uint("tenant_id", req.TenantID))
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"token": token,
+		"tenant": map[string]interface{}{
+			"id":   req.TenantID,
+			"name": userTenant.Tenant.Name,
+			"role": userTenant.Role,
+		},
 	})
 }
