@@ -1,10 +1,8 @@
 package logger
 
 import (
-	"auth-service/pkg/config"
-	"time"
+	"supplier-service/pkg/config"
 
-	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -66,40 +64,4 @@ func InitLogger(config *config.Config) {
 // GetLogger returns the global logger instance
 func GetLogger() *zap.Logger {
 	return log
-}
-
-// Middleware returns an Echo middleware that logs HTTP requests
-func Middleware(logger *zap.Logger) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			start := time.Now()
-
-			// Add request ID to context if available
-			requestID := c.Request().Header.Get("X-Request-ID")
-			if requestID == "" {
-				requestID = c.Response().Header().Get("X-Request-ID")
-			}
-
-			// Set logger in context
-			ctxLogger := logger.With(zap.String("request_id", requestID))
-			c.Set("logger", ctxLogger)
-
-			// Process the request
-			err := next(c)
-
-			// Log after request is processed
-			latency := time.Since(start)
-
-			// Create structured log entry
-			ctxLogger.Info("HTTP Request",
-				zap.String("method", c.Request().Method),
-				zap.String("path", c.Request().URL.Path),
-				zap.Int("status", c.Response().Status),
-				zap.Duration("latency", latency),
-				zap.String("ip", c.RealIP()),
-			)
-
-			return err
-		}
-	}
 }

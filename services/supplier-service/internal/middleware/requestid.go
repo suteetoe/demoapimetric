@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"auth-service/pkg/logger"
+	"supplier-service/pkg/logger"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -11,12 +11,8 @@ import (
 // RequestIDMiddleware adds a unique request ID to each request
 func RequestIDMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		// Check if request already has an ID from upstream services
-		requestID := c.Request().Header.Get("X-Request-ID")
-		if requestID == "" {
-			// Generate a unique request ID if not present
-			requestID = uuid.New().String()
-		}
+		// Generate a unique request ID
+		requestID := uuid.New().String()
 
 		// Add the request ID to the context
 		c.Set("request_id", requestID)

@@ -3,128 +3,100 @@ package main
 import (
 	"auth-service/internal/handler"
 	"auth-service/internal/middleware"
+	"auth-service/pkg/config"
 	"auth-service/pkg/database"
-	applogger "auth-service/pkg/logger"
+	"auth-service/pkg/jwtutil"
+	"auth-service/pkg/logger"
 	"auth-service/prometheus"
-	"fmt"
-	"os"
-	"strconv"
-	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
+	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"go.uber.org/zap"
-	"gorm.io/gorm/logger"
 )
 
 func main() {
-	// Load .env file
-	if err := godotenv.Load(); err != nil {
-		fmt.Printf("Warning: .env file not found or error loading: %v\n", err)
+	// Load configuration from .env file and environment variables
+	cfg, err := config.Load()
+	if err != nil {
+		panic("Failed to load configuration: " + err.Error())
 	}
 
-	// Initialize logger
-	zapLogger, _ := zap.NewProduction()
-	defer zapLogger.Sync()
-	log := zapLogger.Sugar()
-
-	// Get database configuration from environment variables
-	dbConfig := database.DBConfig{
-		DSN:             getEnv("DB_DSN", "root:password@tcp(localhost:3306)/auth_service?charset=utf8mb4&parseTime=True&loc=Local"),
-		MaxIdleConns:    getEnvAsInt("DB_MAX_IDLE_CONNS", 10),
-		MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 100),
-		ConnMaxLifetime: getEnvAsDuration("DB_CONN_MAX_LIFETIME", 1*time.Hour),
-		LogLevel:        getEnvAsLogLevel("DB_LOG_LEVEL", logger.Info),
-	}
+	// Initialize logger with config
+	logger.InitLogger(cfg)
+	log := logger.GetLogger()
+	log.Info("Starting authentication service...", zap.String("environment", cfg.Server.Env))
 
 	// Initialize database
-	if err := database.Initialize(dbConfig); err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+	if err := database.InitDB(cfg); err != nil {
+		log.Fatal("Failed to initialize database", zap.Error(err))
 	}
+	log.Info("Database connection established")
+
+	// Initialize JWT utility
+	jwtutil.Initialize(&cfg.JWT)
+	log.Info("JWT utility initialized")
+
+	// Initialize Prometheus metrics
+	prometheus.InitMetrics(cfg)
+	log.Info("Prometheus metrics initialized")
 
 	// Initialize Echo framework
 	e := echo.New()
 
-	// Apply middleware - order matters
+	// Apply global middleware - order matters
+	e.Use(echomiddleware.Recover()) // Add recovery middleware
+	e.Use(echomiddleware.CORS())    // Add CORS middleware
 	e.Use(middleware.RequestIDMiddleware)
-	e.Use(applogger.Middleware(zapLogger))
-	// Add the Prometheus metrics middleware - this should be after request ID but before other middleware
+	e.Use(logger.Middleware(log))
 	e.Use(prometheus.MetricsMiddleware())
 
-	// Public auth endpoints (no auth required)
-	e.POST("/auth/login", handler.Login)
-	e.POST("/auth/register", handler.Register)
+	// Public routes - no authentication required
+	e.GET("/health", handler.HealthCheck)
 	e.GET("/metrics", handler.MetricsHandler)
 
-	// Tenant selection after login (requires token but no tenant)
-	e.POST("/auth/select-tenant", handler.SelectTenant)
+	// Authentication routes - these don't belong under /api since they're for getting access to the API
+	auth := e.Group("/auth")
+	auth.POST("/login", handler.Login)
+	auth.POST("/register", handler.Register)
 
-	// Secure group - all endpoints require authentication
-	secured := e.Group("")
-	secured.Use(middleware.AuthMiddleware)
+	// API routes - all require authentication
+	api := e.Group("/api")
+	api.Use(middleware.AuthMiddleware)
 
-	// Tenant endpoints
-	secured.POST("/tenants", handler.CreateTenant)
-	secured.GET("/tenants/:id", handler.GetTenant)
-	secured.GET("/tenants", handler.ListUserTenants)
-	secured.POST("/tenants/switch", handler.SwitchTenant)
-	secured.POST("/tenants/default", handler.SetDefaultTenant)
+	// User management
+	users := api.Group("/users")
+	users.GET("/profile", handler.GetProfile)
+	users.PATCH("/profile", handler.UpdateProfile)
+	users.POST("/change-password", handler.ChangePassword)
 
-	// Tenant user management
-	secured.POST("/tenants/users", handler.AddUserToTenant)
-	secured.DELETE("/tenants/:tenant_id/users/:user_id", handler.RemoveUserFromTenant)
+	// Tenant selection - after login but before accessing tenant-specific resources
+	tenantAuth := api.Group("/tenant-auth")
+	tenantAuth.POST("/select", handler.SelectTenant)
+	tenantAuth.POST("/switch", handler.SwitchTenant)
+	tenantAuth.POST("/default", handler.SetDefaultTenant)
 
-	// User profile endpoints
-	secured.GET("/auth/profile", handler.GetProfile)
-	secured.PATCH("/auth/profile", handler.UpdateProfile)
-	secured.POST("/auth/change-password", handler.ChangePassword)
+	// Tenant management - doesn't require tenant context
+	tenants := api.Group("/tenants")
+	tenants.POST("", handler.CreateTenant)
+	tenants.GET("", handler.ListUserTenants)
 
-	// Get server port from environment variable
-	port := getEnv("SERVER_PORT", "8081")
+	// Tenant-specific operations - requires tenant context
+	tenantSpecific := api.Group("/tenants")
+	tenantSpecific.Use(middleware.RequireTenantContext)
+	tenantSpecific.GET("/:id", handler.GetTenant)
+
+	// Tenant user management - requires tenant context
+	tenantUsers := api.Group("/tenant-users")
+	tenantUsers.Use(middleware.RequireTenantContext)
+	tenantUsers.POST("", handler.AddUserToTenant)
+	tenantUsers.DELETE("/:tenant_id/:user_id", handler.RemoveUserFromTenant)
+
+	// Get server port from configuration
+	port := cfg.Server.Port
 
 	// Start server
-	log.Infof("Starting server on :%s", port)
+	log.Info("Starting server", zap.String("port", port))
 	if err := e.Start(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
-}
-
-// Helper functions to get environment variables with defaults
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := getEnv(key, "")
-	if value, err := strconv.Atoi(valueStr); err == nil {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := getEnv(key, "")
-	if value, err := time.ParseDuration(valueStr); err == nil {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvAsLogLevel(key string, defaultValue logger.LogLevel) logger.LogLevel {
-	valueStr := getEnv(key, "")
-	switch valueStr {
-	case "silent":
-		return logger.Silent
-	case "error":
-		return logger.Error
-	case "warn":
-		return logger.Warn
-	case "info":
-		return logger.Info
-	default:
-		return defaultValue
+		log.Fatal("Failed to start server", zap.Error(err))
 	}
 }

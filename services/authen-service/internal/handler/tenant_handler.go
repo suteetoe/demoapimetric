@@ -17,14 +17,19 @@ import (
 // CreateTenant handles tenant creation
 func CreateTenant(c echo.Context) error {
 	log := logger.FromContext(c)
+	log.Info("Processing tenant creation request")
 	prometheus.RecordTenantOperation("create")
 
 	// Get user ID from context (set by AuthMiddleware)
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		log.Error("Failed to get user ID from context")
+		log.Error("Failed to get user ID from context",
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("unauthorized_tenant_creation")
-		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
+		return c.JSON(http.StatusUnauthorized, echo.Map{
+			"error":   "Authentication required",
+			"message": "You must be authenticated to create a tenant",
+		})
 	}
 
 	// Parse request
@@ -35,26 +40,47 @@ func CreateTenant(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil {
-		log.Error("Failed to parse tenant creation request", zap.Error(err))
+		log.Error("Failed to parse tenant creation request",
+			zap.Error(err),
+			zap.Uint("user_id", userID),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("invalid_request")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error":   "Invalid request format",
+			"message": "The request could not be processed due to invalid format",
+		})
 	}
 
 	if req.Name == "" {
-		log.Error("Invalid tenant data", zap.String("name", req.Name))
+		log.Warn("Tenant creation attempt with missing name",
+			zap.Uint("user_id", userID),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("incomplete_tenant_creation")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "name is required"})
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error":   "Missing required field",
+			"message": "Tenant name is required",
+		})
 	}
 
+	log.Info("Starting tenant creation process",
+		zap.Uint("user_id", userID),
+		zap.String("tenant_name", req.Name))
+
 	// Track DB operations
-	defer prometheus.TrackDBOperation("insert")(time.Now())
+	defer prometheus.TrackDBOperation("transaction")(time.Now())
 
 	// Begin transaction
 	tx := database.GetDB().Begin()
 	if tx.Error != nil {
-		log.Error("Failed to begin transaction", zap.Error(tx.Error))
+		log.Error("Failed to begin transaction",
+			zap.Error(tx.Error),
+			zap.Uint("user_id", userID),
+			zap.String("tenant_name", req.Name))
 		prometheus.RecordAuthError("database_error")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "database error"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Database error",
+			"message": "Could not create tenant due to a database error",
+		})
 	}
 
 	// Create tenant
@@ -69,9 +95,15 @@ func CreateTenant(c echo.Context) error {
 	// Save tenant to database
 	if result := tx.Create(&tenant); result.Error != nil {
 		tx.Rollback()
-		log.Error("Failed to create tenant", zap.Error(result.Error))
+		log.Error("Failed to create tenant",
+			zap.Error(result.Error),
+			zap.Uint("user_id", userID),
+			zap.String("tenant_name", req.Name))
 		prometheus.RecordAuthError("tenant_creation_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "tenant creation failed"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Tenant creation failed",
+			"message": "The system could not create the tenant at this time",
+		})
 	}
 
 	// Also create UserTenant association with owner role
@@ -85,26 +117,47 @@ func CreateTenant(c echo.Context) error {
 
 	if result := tx.Create(&userTenant); result.Error != nil {
 		tx.Rollback()
-		log.Error("Failed to create user-tenant association", zap.Error(result.Error))
+		log.Error("Failed to create user-tenant association",
+			zap.Error(result.Error),
+			zap.Uint("user_id", userID),
+			zap.Uint("tenant_id", tenant.ID))
 		prometheus.RecordAuthError("tenant_association_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "tenant association failed"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Tenant association failed",
+			"message": "The system could not associate the user with the tenant",
+		})
 	}
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		log.Error("Failed to commit transaction", zap.Error(err))
+		log.Error("Failed to commit transaction",
+			zap.Error(err),
+			zap.Uint("user_id", userID),
+			zap.Uint("tenant_id", tenant.ID))
 		prometheus.RecordAuthError("transaction_commit_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "transaction commit failed"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Transaction failed",
+			"message": "The tenant creation process could not be completed",
+		})
 	}
 
-	log.Info("Tenant created",
+	// Update active tenants metric
+	prometheus.UpdateActiveTenants(1) // Increment by 1 since we just created a new tenant
+
+	log.Info("Tenant created successfully",
 		zap.String("name", tenant.Name),
-		zap.Uint("id", tenant.ID),
+		zap.Uint("tenant_id", tenant.ID),
 		zap.Uint("owner_id", tenant.OwnerID))
 
 	return c.JSON(http.StatusCreated, echo.Map{
 		"message": "Tenant created successfully",
-		"tenant":  tenant,
+		"tenant": echo.Map{
+			"id":          tenant.ID,
+			"name":        tenant.Name,
+			"description": tenant.Description,
+			"owner_id":    tenant.OwnerID,
+			"created_at":  tenant.CreatedAt,
+		},
 	})
 }
 
@@ -206,22 +259,32 @@ func ListUserTenants(c echo.Context) error {
 // SwitchTenant generates a new token with a different tenant context
 func SwitchTenant(c echo.Context) error {
 	log := logger.FromContext(c)
+	log.Info("Processing tenant switch request")
 	prometheus.RecordTenantOperation("switch")
 
 	// Get user ID from context (set by AuthMiddleware)
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		log.Error("Failed to get user ID from context")
+		log.Error("Failed to get user ID from context",
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("unauthorized_tenant_switch")
-		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
+		return c.JSON(http.StatusUnauthorized, echo.Map{
+			"error":   "Authentication required",
+			"message": "You must be authenticated to switch tenants",
+		})
 	}
 
 	// Get email from context
 	email, ok := c.Get("email").(string)
 	if !ok {
-		log.Error("Failed to get email from context")
+		log.Error("Failed to get email from context",
+			zap.Uint("user_id", userID),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("context_missing_email")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "email missing from context"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Context error",
+			"message": "Email missing from authentication context",
+		})
 	}
 
 	// Parse request
@@ -230,16 +293,31 @@ func SwitchTenant(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil {
-		log.Error("Failed to parse tenant switch request", zap.Error(err))
+		log.Error("Failed to parse tenant switch request",
+			zap.Error(err),
+			zap.Uint("user_id", userID),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("invalid_request")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error":   "Invalid request format",
+			"message": "The tenant switch request could not be processed",
+		})
 	}
 
 	if req.TenantID == 0 {
-		log.Error("Invalid tenant ID", zap.Uint("tenant_id", req.TenantID))
+		log.Warn("Tenant switch attempt with invalid tenant ID",
+			zap.Uint("user_id", userID),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("invalid_tenant_id")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "tenant_id is required"})
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error":   "Missing tenant ID",
+			"message": "A valid tenant ID is required to switch tenants",
+		})
 	}
+
+	log.Info("Verifying tenant access permissions",
+		zap.Uint("user_id", userID),
+		zap.Uint("tenant_id", req.TenantID))
 
 	// Track DB operations
 	defer prometheus.TrackDBOperation("query")(time.Now())
@@ -250,38 +328,58 @@ func SwitchTenant(c echo.Context) error {
 	if result.Error != nil {
 		log.Warn("Unauthorized tenant switch attempt",
 			zap.Uint("user_id", userID),
-			zap.Uint("tenant_id", req.TenantID))
+			zap.Uint("tenant_id", req.TenantID),
+			zap.String("remote_ip", c.RealIP()),
+			zap.Error(result.Error))
 		prometheus.RecordAuthError("tenant_access_denied")
-		return c.JSON(http.StatusForbidden, echo.Map{"error": "access denied to requested tenant"})
+		return c.JSON(http.StatusForbidden, echo.Map{
+			"error":   "Access denied",
+			"message": "You do not have permission to access the requested tenant",
+		})
 	}
 
 	// Get tenant name
 	var tenant model.Tenant
 	if result := database.GetDB().Select("name").First(&tenant, req.TenantID); result.Error != nil {
-		log.Error("Tenant not found", zap.Uint("id", req.TenantID), zap.Error(result.Error))
+		log.Error("Tenant not found",
+			zap.Uint("tenant_id", req.TenantID),
+			zap.Uint("user_id", userID),
+			zap.Error(result.Error))
 		prometheus.RecordAuthError("tenant_not_found")
-		return c.JSON(http.StatusNotFound, echo.Map{"error": "tenant not found"})
+		return c.JSON(http.StatusNotFound, echo.Map{
+			"error":   "Tenant not found",
+			"message": "The requested tenant could not be found",
+		})
 	}
 
 	// Generate new JWT token with tenant context
 	tenantID := req.TenantID
 	token, err := jwtutil.GenerateTokenWithTenant(email, userID, &tenantID, tenant.Name, userTenant.Role)
 	if err != nil {
-		log.Error("Failed to generate token", zap.Error(err))
+		log.Error("Failed to generate token",
+			zap.Error(err),
+			zap.Uint("user_id", userID),
+			zap.Uint("tenant_id", req.TenantID))
 		prometheus.RecordAuthError("token_generation_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "token error"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Token generation failed",
+			"message": "Unable to generate authentication token for this tenant",
+		})
 	}
 
 	// Increment active tokens gauge
 	prometheus.IncreaseActiveTokens()
 
-	log.Info("User switched tenant",
+	log.Info("User switched tenant successfully",
 		zap.String("email", email),
 		zap.Uint("user_id", userID),
-		zap.Uint("tenant_id", req.TenantID))
+		zap.Uint("tenant_id", req.TenantID),
+		zap.String("tenant_name", tenant.Name),
+		zap.String("role", userTenant.Role))
 
 	return c.JSON(http.StatusOK, echo.Map{
-		"token": token,
+		"message": "Tenant switched successfully",
+		"token":   token,
 		"tenant": map[string]interface{}{
 			"id":   tenant.ID,
 			"name": tenant.Name,

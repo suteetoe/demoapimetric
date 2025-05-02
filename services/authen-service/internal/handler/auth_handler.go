@@ -17,6 +17,7 @@ import (
 // Login authenticates a user and returns a JWT token without tenant information
 func Login(c echo.Context) error {
 	log := logger.FromContext(c)
+	log.Info("Processing login request")
 	prometheus.LoginCounter.Inc()
 
 	// Parse request
@@ -26,16 +27,27 @@ func Login(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil {
-		log.Error("Failed to parse login request", zap.Error(err))
+		log.Error("Failed to parse login request",
+			zap.Error(err),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("invalid_request")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error":   "Invalid request format",
+			"message": "The request could not be processed due to invalid format",
+		})
 	}
 
 	// Validate required fields
 	if req.Email == "" || req.Password == "" {
-		log.Error("Missing credentials")
+		log.Warn("Login attempt with missing credentials",
+			zap.Bool("email_provided", req.Email != ""),
+			zap.Bool("password_provided", req.Password != ""),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("missing_credentials")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "email and password are required"})
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error":   "Missing credentials",
+			"message": "Both email and password are required",
+		})
 	}
 
 	// Track DB operations
@@ -44,24 +56,42 @@ func Login(c echo.Context) error {
 	// Find user by email
 	var user model.User
 	if result := database.GetDB().Where("email = ?", req.Email).First(&user); result.Error != nil {
-		log.Warn("Login attempt with non-existent email", zap.String("email", req.Email))
+		log.Warn("Login attempt with non-existent email",
+			zap.String("email", req.Email),
+			zap.String("remote_ip", c.RealIP()),
+			zap.Error(result.Error))
 		prometheus.RecordAuthError("user_not_found")
-		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "invalid credentials"})
+		// Don't reveal whether the user exists - use generic message
+		return c.JSON(http.StatusUnauthorized, echo.Map{
+			"error":   "Invalid credentials",
+			"message": "The provided email or password is incorrect",
+		})
 	}
 
 	// Check password
 	if !checkPasswordHash(req.Password, user.Password) {
-		log.Warn("Login attempt with incorrect password", zap.String("email", req.Email))
+		log.Warn("Login attempt with incorrect password",
+			zap.String("email", req.Email),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("invalid_password")
-		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "invalid credentials"})
+		return c.JSON(http.StatusUnauthorized, echo.Map{
+			"error":   "Invalid credentials",
+			"message": "The provided email or password is incorrect",
+		})
 	}
 
 	// Generate JWT token without tenant information
 	token, err := jwtutil.GenerateToken(user.Email, user.ID)
 	if err != nil {
-		log.Error("Failed to generate token", zap.Error(err))
+		log.Error("Failed to generate token",
+			zap.Error(err),
+			zap.String("email", user.Email),
+			zap.Uint("user_id", user.ID))
 		prometheus.RecordAuthError("token_generation_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "authentication error"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Authentication error",
+			"message": "Could not process the login request at this time",
+		})
 	}
 
 	// Increment active tokens gauge
@@ -70,7 +100,9 @@ func Login(c echo.Context) error {
 	// Fetch available tenants for the user
 	var userTenants []model.UserTenant
 	if result := database.GetDB().Preload("Tenant").Where("user_id = ? AND active = ?", user.ID, true).Find(&userTenants); result.Error != nil {
-		log.Error("Failed to fetch user tenants", zap.Error(result.Error))
+		log.Error("Failed to fetch user tenants",
+			zap.Error(result.Error),
+			zap.Uint("user_id", user.ID))
 		// We still continue, just won't return tenant info
 	}
 
@@ -86,7 +118,9 @@ func Login(c echo.Context) error {
 
 	log.Info("User logged in successfully",
 		zap.String("email", req.Email),
-		zap.Uint("id", user.ID))
+		zap.Uint("id", user.ID),
+		zap.Int("tenant_count", len(tenants)),
+		zap.String("remote_ip", c.RealIP()))
 
 	return c.JSON(http.StatusOK, echo.Map{
 		"token":   token,
@@ -98,61 +132,96 @@ func Login(c echo.Context) error {
 
 func Register(c echo.Context) error {
 	log := logger.FromContext(c)
+	log.Info("Processing registration request")
 	prometheus.RegisterCounter.Inc()
 
 	// Parse request
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email     string `json:"email"`
+		Password  string `json:"password"`
+		FirstName string `json:"first_name,omitempty"`
+		LastName  string `json:"last_name,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil {
-		log.Error("Failed to parse registration request", zap.Error(err))
+		log.Error("Failed to parse registration request",
+			zap.Error(err),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("invalid_request")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error":   "Invalid request format",
+			"message": "The request could not be processed due to invalid format",
+		})
 	}
 
+	// Validate required fields
 	if req.Email == "" || req.Password == "" {
-		log.Error("Invalid registration data",
-			zap.String("email", req.Email),
-			zap.Bool("password_provided", req.Password != ""))
+		log.Warn("Registration attempt with missing required fields",
+			zap.Bool("email_provided", req.Email != ""),
+			zap.Bool("password_provided", req.Password != ""),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("incomplete_registration")
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "email and password are required"})
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"error":   "Missing required fields",
+			"message": "Email and password are required for registration",
+		})
 	}
 
-	// Check if user already exists - track DB query
+	// Check if user already exists
 	defer prometheus.TrackDBOperation("query")(time.Now())
 	var existingUser model.User
 	result := database.GetDB().Where("email = ?", req.Email).First(&existingUser)
 	if result.Error == nil {
-		log.Error("User already exists", zap.String("email", req.Email))
+		log.Warn("Registration attempt with existing email",
+			zap.String("email", req.Email),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("email_already_exists")
-		return c.JSON(http.StatusConflict, echo.Map{"error": "email already registered"})
+		return c.JSON(http.StatusConflict, echo.Map{
+			"error":   "Email already registered",
+			"message": "An account with this email already exists",
+		})
 	}
 
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Error("Failed to hash password", zap.Error(err))
+		log.Error("Failed to hash password",
+			zap.Error(err),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("password_hash_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "registration failed"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Registration failed",
+			"message": "Could not process the registration request at this time",
+		})
 	}
 
 	// Create new user
 	user := model.User{
-		Email:    req.Email,
-		Password: string(hashedPassword),
+		Email:     req.Email,
+		Password:  string(hashedPassword),
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
 	}
 
 	// Save to database - track DB insert operation
 	defer prometheus.TrackDBOperation("insert")(time.Now())
 	if result := database.GetDB().Create(&user); result.Error != nil {
-		log.Error("Failed to create user", zap.Error(result.Error))
+		log.Error("Failed to create user record",
+			zap.Error(result.Error),
+			zap.String("email", req.Email),
+			zap.String("remote_ip", c.RealIP()))
 		prometheus.RecordAuthError("user_creation_failed")
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "registration failed"})
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":   "Registration failed",
+			"message": "Could not complete the registration process",
+		})
 	}
 
-	log.Info("User registered", zap.String("email", user.Email))
+	log.Info("User registered successfully",
+		zap.String("email", user.Email),
+		zap.Uint("user_id", user.ID),
+		zap.String("remote_ip", c.RealIP()))
+
 	return c.JSON(http.StatusCreated, echo.Map{
 		"message": "User registered successfully",
 		"user": map[string]interface{}{
@@ -363,6 +432,14 @@ func MetricsHandler(c echo.Context) error {
 	handler := prometheus.GetPrometheusHandler()
 	handler.ServeHTTP(c.Response(), c.Request())
 	return nil
+}
+
+// HealthCheck handles the health check endpoint
+func HealthCheck(c echo.Context) error {
+	return c.JSON(http.StatusOK, echo.Map{
+		"status":  "healthy",
+		"service": "authen-service",
+	})
 }
 
 // Helper function to safely handle nil uint pointers for logging

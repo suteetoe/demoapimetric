@@ -1,15 +1,13 @@
 package middleware
 
 import (
-	"auth-service/pkg/jwtutil"
-	"auth-service/pkg/logger"
-	localprometheus "auth-service/prometheus"
-	"fmt"
 	"net/http"
 	"strings"
+	"supplier-service/pkg/jwtutil"
+	"supplier-service/pkg/logger"
+	"supplier-service/prometheus"
 
 	"github.com/labstack/echo/v4"
-	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
@@ -19,13 +17,13 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		log := logger.FromContext(c)
 
 		// Track authentication attempts
-		localprometheus.AuthAttemptsCounter.Inc()
+		prometheus.AuthAttemptsCounter.Inc()
 
 		// Extract the token from the Authorization header
 		tokenString := c.Request().Header.Get("Authorization")
 		if tokenString == "" {
 			log.Warn("Missing authorization token")
-			localprometheus.AuthErrorCounter.With(prometheus.Labels{"type": "missing_token"}).Inc()
+			prometheus.AuthErrorsCounter.Inc()
 			return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
 		}
 
@@ -38,12 +36,12 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		claims, err := jwtutil.ValidateToken(tokenString)
 		if err != nil {
 			log.Warn("Invalid token", zap.Error(err))
-			localprometheus.AuthErrorCounter.With(prometheus.Labels{"type": "invalid_token"}).Inc()
+			prometheus.AuthErrorsCounter.Inc()
 			return c.JSON(http.StatusUnauthorized, echo.Map{"error": "invalid token"})
 		}
 
 		// Increment successful auth counter
-		localprometheus.AuthSuccessCounter.Inc()
+		prometheus.AuthSuccessCounter.Inc()
 
 		// Store user information in the context
 		c.Set("user_id", claims.UserID)
@@ -54,11 +52,6 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			c.Set("tenant_id", *claims.TenantID)
 			c.Set("tenant_name", claims.TenantName)
 			c.Set("role", claims.Role)
-
-			// Add tenant ID to request header for downstream services
-			c.Request().Header.Set("X-Tenant-ID", fmt.Sprintf("%d", *claims.TenantID))
-			c.Request().Header.Set("X-Tenant-Name", claims.TenantName)
-			c.Request().Header.Set("X-User-Role", claims.Role)
 
 			// Add tenant info to logger
 			log = log.With(
@@ -89,7 +82,7 @@ func RequireTenantContext(next echo.HandlerFunc) echo.HandlerFunc {
 		tenantID, ok := c.Get("tenant_id").(uint)
 		if !ok || tenantID == 0 {
 			log.Warn("Missing tenant context")
-			localprometheus.TenantContextMissingCounter.Inc()
+			prometheus.TenantContextMissingCounter.Inc()
 			return c.JSON(http.StatusForbidden, echo.Map{
 				"error":   "tenant context required",
 				"message": "Please select a tenant before accessing this resource",

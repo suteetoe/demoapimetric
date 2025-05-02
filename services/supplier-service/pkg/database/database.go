@@ -1,17 +1,17 @@
 package database
 
 import (
-	"auth-service/internal/model"
-	"auth-service/pkg/config"
 	"fmt"
 	"log"
+	"supplier-service/internal/model"
+	"supplier-service/pkg/config"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-var DB *gorm.DB
+var db *gorm.DB
 
 // InitDB initializes the database connection with configuration and runs migrations
 func InitDB(config *config.Config) error {
@@ -35,7 +35,7 @@ func InitDB(config *config.Config) error {
 	}
 
 	// Open connection
-	DB, err = gorm.Open(postgres.New(pgConfig), &gorm.Config{
+	db, err = gorm.Open(postgres.New(pgConfig), &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
 	})
 	if err != nil {
@@ -44,7 +44,7 @@ func InitDB(config *config.Config) error {
 	}
 
 	// Get generic database object SQL
-	sqlDB, err := DB.DB()
+	sqlDB, err := db.DB()
 	if err != nil {
 		log.Fatalf("Failed to get database object: %v", err)
 		return err
@@ -58,7 +58,7 @@ func InitDB(config *config.Config) error {
 	fmt.Println("Database connected successfully")
 
 	// Run migrations
-	if err := DB.AutoMigrate(&model.User{}, &model.Tenant{}, &model.UserTenant{}); err != nil {
+	if err := db.AutoMigrate(&model.Supplier{}); err != nil {
 		return fmt.Errorf("failed to run database migrations: %w", err)
 	}
 
@@ -67,5 +67,5 @@ func InitDB(config *config.Config) error {
 
 // GetDB returns the database instance
 func GetDB() *gorm.DB {
-	return DB
+	return db
 }

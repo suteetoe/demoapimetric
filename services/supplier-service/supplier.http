@@ -1,0 +1,68 @@
+### Variables
+@baseUrl = http://localhost:8083
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJ0ZW5hbnRfaWQiOjEsInRlbmFudF9uYW1lIjoiTXkgQ29tcGFueSIsInJvbGUiOiJvd25lciIsImV4cCI6MTc0NjE3MTA0MiwiaWF0IjoxNzQ2MTY3NDQyfQ.afCp2mC1yxCrN_sN7EtgAIACVRfPsVIKPEdZCHv-AJM
+
+### Health check
+GET {{baseUrl}}/health
+
+### List all suppliers
+GET {{baseUrl}}/api/suppliers
+Authorization: Bearer {{authToken}}
+
+### List suppliers with filters
+GET {{baseUrl}}/api/suppliers?is_active=true&page=1&limit=10
+Authorization: Bearer {{authToken}}
+
+### Get a specific supplier by ID
+GET {{baseUrl}}/api/suppliers/1
+Authorization: Bearer {{authToken}}
+
+### Create a new supplier
+POST {{baseUrl}}/api/suppliers
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Acme Supplies",
+  "code": "ACME-001",
+  "contact_person": "John Doe",
+  "email": "john@acmesupplies.com",
+  "phone": "+1-555-123-4567",
+  "address": "123 Supply Street",
+  "city": "Supplier City",
+  "state": "ST",
+  "country": "United States",
+  "postal_code": "12345",
+  "tax_id": "TAX-12345",
+  "payment_terms": "Net 30",
+  "notes": "Preferred supplier for electronics",
+  "is_active": true,
+  "rating": 5
+}
+
+### Update an existing supplier
+PUT {{baseUrl}}/api/suppliers/1
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Acme Supplies Updated",
+  "code": "ACME-001",
+  "contact_person": "Jane Smith",
+  "email": "jane@acmesupplies.com",
+  "phone": "+1-555-123-9876",
+  "address": "456 Supply Avenue",
+  "city": "New Supplier City",
+  "state": "NS",
+  "country": "United States",
+  "postal_code": "54321",
+  "tax_id": "TAX-67890",
+  "payment_terms": "Net 60",
+  "notes": "Upgraded to premium supplier status",
+  "is_active": true,
+  "rating": 4
+}
+
+### Delete a supplier
+DELETE {{baseUrl}}/api/suppliers/1
+Authorization: Bearer {{authToken}}

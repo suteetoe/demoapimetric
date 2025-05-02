@@ -1,6 +1,7 @@
 package prometheus
 
 import (
+	"auth-service/pkg/config"
 	"net/http"
 	"strconv"
 	"time"
@@ -79,6 +80,29 @@ var (
 			Help: "Total number of authentication operations",
 		},
 		[]string{"operation"}, // operation can be "profile_access", "profile_update", "password_change", etc.
+	)
+
+	// Authentication-specific counters
+	AuthAttemptsCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "auth_auth_attempts_total",
+			Help: "Total number of authentication attempts",
+		},
+	)
+
+	AuthSuccessCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "auth_auth_success_total",
+			Help: "Total number of successful authentications",
+		},
+	)
+
+	// Tenant context metrics
+	TenantContextMissingCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "auth_tenant_context_missing_total",
+			Help: "Total number of requests without required tenant context",
+		},
 	)
 )
 
@@ -163,6 +187,11 @@ func init() {
 	prometheus.MustRegister(TenantErrorCounter)
 	prometheus.MustRegister(AuthOperationCounter)
 
+	// Register additional authentication metrics
+	prometheus.MustRegister(AuthAttemptsCounter)
+	prometheus.MustRegister(AuthSuccessCounter)
+	prometheus.MustRegister(TenantContextMissingCounter)
+
 	// Register histograms
 	prometheus.MustRegister(RequestDuration)
 	prometheus.MustRegister(DBOperationDuration)
@@ -176,6 +205,21 @@ func init() {
 
 	// Set initial service info
 	InfoGauge.With(prometheus.Labels{"version": "1.0.0"}).Set(1)
+}
+
+// InitMetrics initializes metrics with configuration
+func InitMetrics(cfg *config.Config) {
+	// Set initial service info with metrics prefix
+	metricPrefix := cfg.Metrics.Prefix
+	if metricPrefix != "" {
+		// If we wanted to add the prefix to metric names, we would do it here
+		// For now, we'll just log it and ensure our metrics are initialized
+	}
+
+	// Set initial service info
+	InfoGauge.With(prometheus.Labels{"version": "1.0.0"}).Set(1)
+
+	// Additional metrics initialization if needed based on config
 }
 
 // GetPrometheusHandler returns an HTTP handler for the Prometheus metrics
