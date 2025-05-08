@@ -29,6 +29,15 @@ var (
 		},
 	)
 
+	// Total API requests counter - for rate calculations
+	APIRequestsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "auth_api_requests_total",
+			Help: "Total count of API requests for rate calculations",
+		},
+		[]string{"service", "endpoint_type"}, // service name, endpoint type (auth, profile, etc.)
+	)
+
 	// Tenant selection counter
 	TenantSelectionCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
@@ -180,6 +189,7 @@ func init() {
 	// Register counters
 	prometheus.MustRegister(LoginCounter)
 	prometheus.MustRegister(RegisterCounter)
+	prometheus.MustRegister(APIRequestsCounter)
 	prometheus.MustRegister(TenantSelectionCounter)
 	prometheus.MustRegister(TenantOperationCounter)
 	prometheus.MustRegister(HTTPRequestCounter)
@@ -278,9 +288,32 @@ func MetricsMiddleware() echo.MiddlewareFunc {
 				"status":   status,
 			}).Inc()
 
+			// Increment API request counter (for rate calculations)
+			endpointType := determineEndpointType(endpoint)
+			APIRequestsCounter.With(prometheus.Labels{
+				"service":       "authen-service",
+				"endpoint_type": endpointType,
+			}).Inc()
+
 			return err
 		}
 	}
+}
+
+// determineEndpointType categorizes endpoints for metrics
+func determineEndpointType(endpoint string) string {
+	if endpoint == "/login" || endpoint == "/register" {
+		return "auth"
+	} else if endpoint == "/metrics" {
+		return "metrics"
+	} else if endpoint == "/health" {
+		return "health"
+	} else if endpoint == "/api/profile" || endpoint == "/api/profile/update" || endpoint == "/api/profile/password" {
+		return "profile"
+	} else if endpoint == "/api/tenant" || endpoint == "/api/tenant/select" {
+		return "tenant"
+	}
+	return "other"
 }
 
 // IncreaseActiveTokens increments the active tokens gauge

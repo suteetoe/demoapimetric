@@ -5,11 +5,12 @@ import (
 	"auth-service/pkg/database"
 	"auth-service/pkg/jwtutil"
 	"auth-service/pkg/logger"
-	"auth-service/prometheus"
+	localprometheus "auth-service/prometheus"
 	"net/http"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -18,7 +19,7 @@ import (
 func Login(c echo.Context) error {
 	log := logger.FromContext(c)
 	log.Info("Processing login request")
-	prometheus.LoginCounter.Inc()
+	localprometheus.LoginCounter.Inc()
 
 	// Parse request
 	var req struct {
@@ -30,7 +31,7 @@ func Login(c echo.Context) error {
 		log.Error("Failed to parse login request",
 			zap.Error(err),
 			zap.String("remote_ip", c.RealIP()))
-		prometheus.RecordAuthError("invalid_request")
+		localprometheus.RecordAuthError("invalid_request")
 		return c.JSON(http.StatusBadRequest, echo.Map{
 			"error":   "Invalid request format",
 			"message": "The request could not be processed due to invalid format",
@@ -43,7 +44,7 @@ func Login(c echo.Context) error {
 			zap.Bool("email_provided", req.Email != ""),
 			zap.Bool("password_provided", req.Password != ""),
 			zap.String("remote_ip", c.RealIP()))
-		prometheus.RecordAuthError("missing_credentials")
+		localprometheus.RecordAuthError("missing_credentials")
 		return c.JSON(http.StatusBadRequest, echo.Map{
 			"error":   "Missing credentials",
 			"message": "Both email and password are required",
@@ -51,7 +52,7 @@ func Login(c echo.Context) error {
 	}
 
 	// Track DB operations
-	defer prometheus.TrackDBOperation("query")(time.Now())
+	defer localprometheus.TrackDBOperation("query")(time.Now())
 
 	// Find user by email
 	var user model.User
@@ -60,7 +61,7 @@ func Login(c echo.Context) error {
 			zap.String("email", req.Email),
 			zap.String("remote_ip", c.RealIP()),
 			zap.Error(result.Error))
-		prometheus.RecordAuthError("user_not_found")
+		localprometheus.RecordAuthError("user_not_found")
 		// Don't reveal whether the user exists - use generic message
 		return c.JSON(http.StatusUnauthorized, echo.Map{
 			"error":   "Invalid credentials",
@@ -73,7 +74,7 @@ func Login(c echo.Context) error {
 		log.Warn("Login attempt with incorrect password",
 			zap.String("email", req.Email),
 			zap.String("remote_ip", c.RealIP()))
-		prometheus.RecordAuthError("invalid_password")
+		localprometheus.RecordAuthError("invalid_password")
 		return c.JSON(http.StatusUnauthorized, echo.Map{
 			"error":   "Invalid credentials",
 			"message": "The provided email or password is incorrect",
@@ -87,7 +88,7 @@ func Login(c echo.Context) error {
 			zap.Error(err),
 			zap.String("email", user.Email),
 			zap.Uint("user_id", user.ID))
-		prometheus.RecordAuthError("token_generation_failed")
+		localprometheus.RecordAuthError("token_generation_failed")
 		return c.JSON(http.StatusInternalServerError, echo.Map{
 			"error":   "Authentication error",
 			"message": "Could not process the login request at this time",
@@ -95,7 +96,7 @@ func Login(c echo.Context) error {
 	}
 
 	// Increment active tokens gauge
-	prometheus.IncreaseActiveTokens()
+	localprometheus.IncreaseActiveTokens()
 
 	// Fetch available tenants for the user
 	var userTenants []model.UserTenant
@@ -122,6 +123,16 @@ func Login(c echo.Context) error {
 		zap.Int("tenant_count", len(tenants)),
 		zap.String("remote_ip", c.RealIP()))
 
+	// Record successful authentication
+	localprometheus.AuthSuccessCounter.Inc()
+	// Record authentication operation
+	localprometheus.RecordAuthOperation("login_success")
+	// Track API request specifically for rate monitoring
+	localprometheus.APIRequestsCounter.With(prometheus.Labels{
+		"service":       "authen-service",
+		"endpoint_type": "auth_login",
+	}).Inc()
+
 	return c.JSON(http.StatusOK, echo.Map{
 		"token":   token,
 		"user_id": user.ID,
@@ -133,7 +144,7 @@ func Login(c echo.Context) error {
 func Register(c echo.Context) error {
 	log := logger.FromContext(c)
 	log.Info("Processing registration request")
-	prometheus.RegisterCounter.Inc()
+	localprometheus.RegisterCounter.Inc()
 
 	// Parse request
 	var req struct {
@@ -147,7 +158,7 @@ func Register(c echo.Context) error {
 		log.Error("Failed to parse registration request",
 			zap.Error(err),
 			zap.String("remote_ip", c.RealIP()))
-		prometheus.RecordAuthError("invalid_request")
+		localprometheus.RecordAuthError("invalid_request")
 		return c.JSON(http.StatusBadRequest, echo.Map{
 			"error":   "Invalid request format",
 			"message": "The request could not be processed due to invalid format",
@@ -160,7 +171,7 @@ func Register(c echo.Context) error {
 			zap.Bool("email_provided", req.Email != ""),
 			zap.Bool("password_provided", req.Password != ""),
 			zap.String("remote_ip", c.RealIP()))
-		prometheus.RecordAuthError("incomplete_registration")
+		localprometheus.RecordAuthError("incomplete_registration")
 		return c.JSON(http.StatusBadRequest, echo.Map{
 			"error":   "Missing required fields",
 			"message": "Email and password are required for registration",
@@ -168,14 +179,14 @@ func Register(c echo.Context) error {
 	}
 
 	// Check if user already exists
-	defer prometheus.TrackDBOperation("query")(time.Now())
+	defer localprometheus.TrackDBOperation("query")(time.Now())
 	var existingUser model.User
 	result := database.GetDB().Where("email = ?", req.Email).First(&existingUser)
 	if result.Error == nil {
 		log.Warn("Registration attempt with existing email",
 			zap.String("email", req.Email),
 			zap.String("remote_ip", c.RealIP()))
-		prometheus.RecordAuthError("email_already_exists")
+		localprometheus.RecordAuthError("email_already_exists")
 		return c.JSON(http.StatusConflict, echo.Map{
 			"error":   "Email already registered",
 			"message": "An account with this email already exists",
@@ -188,7 +199,7 @@ func Register(c echo.Context) error {
 		log.Error("Failed to hash password",
 			zap.Error(err),
 			zap.String("remote_ip", c.RealIP()))
-		prometheus.RecordAuthError("password_hash_failed")
+		localprometheus.RecordAuthError("password_hash_failed")
 		return c.JSON(http.StatusInternalServerError, echo.Map{
 			"error":   "Registration failed",
 			"message": "Could not process the registration request at this time",
@@ -204,13 +215,13 @@ func Register(c echo.Context) error {
 	}
 
 	// Save to database - track DB insert operation
-	defer prometheus.TrackDBOperation("insert")(time.Now())
+	defer localprometheus.TrackDBOperation("insert")(time.Now())
 	if result := database.GetDB().Create(&user); result.Error != nil {
 		log.Error("Failed to create user record",
 			zap.Error(result.Error),
 			zap.String("email", req.Email),
 			zap.String("remote_ip", c.RealIP()))
-		prometheus.RecordAuthError("user_creation_failed")
+		localprometheus.RecordAuthError("user_creation_failed")
 		return c.JSON(http.StatusInternalServerError, echo.Map{
 			"error":   "Registration failed",
 			"message": "Could not complete the registration process",
@@ -221,6 +232,12 @@ func Register(c echo.Context) error {
 		zap.String("email", user.Email),
 		zap.Uint("user_id", user.ID),
 		zap.String("remote_ip", c.RealIP()))
+
+	// Track API request specifically for rate monitoring
+	localprometheus.APIRequestsCounter.With(prometheus.Labels{
+		"service":       "authen-service",
+		"endpoint_type": "auth_register",
+	}).Inc()
 
 	return c.JSON(http.StatusCreated, echo.Map{
 		"message": "User registered successfully",
@@ -234,24 +251,24 @@ func Register(c echo.Context) error {
 // GetProfile retrieves the authenticated user's profile information
 func GetProfile(c echo.Context) error {
 	log := logger.FromContext(c)
-	prometheus.RecordAuthOperation("profile_access")
+	localprometheus.RecordAuthOperation("profile_access")
 
 	// Get user ID from context (set by AuthMiddleware)
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
 		log.Error("Failed to get user ID from context")
-		prometheus.RecordAuthError("unauthorized_profile_access")
+		localprometheus.RecordAuthError("unauthorized_profile_access")
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
 	}
 
 	// Track DB operations
-	defer prometheus.TrackDBOperation("query")(time.Now())
+	defer localprometheus.TrackDBOperation("query")(time.Now())
 
 	// Find user by ID
 	var user model.User
 	if result := database.GetDB().First(&user, userID); result.Error != nil {
 		log.Error("Failed to retrieve user profile", zap.Error(result.Error))
-		prometheus.RecordAuthError("profile_retrieval_failed")
+		localprometheus.RecordAuthError("profile_retrieval_failed")
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to retrieve profile"})
 	}
 
@@ -271,13 +288,13 @@ func GetProfile(c echo.Context) error {
 // UpdateProfile updates the authenticated user's profile information
 func UpdateProfile(c echo.Context) error {
 	log := logger.FromContext(c)
-	prometheus.RecordAuthOperation("profile_update")
+	localprometheus.RecordAuthOperation("profile_update")
 
 	// Get user ID from context (set by AuthMiddleware)
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
 		log.Error("Failed to get user ID from context")
-		prometheus.RecordAuthError("unauthorized_profile_update")
+		localprometheus.RecordAuthError("unauthorized_profile_update")
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
 	}
 
@@ -290,18 +307,18 @@ func UpdateProfile(c echo.Context) error {
 
 	if err := c.Bind(&req); err != nil {
 		log.Error("Failed to parse profile update request", zap.Error(err))
-		prometheus.RecordAuthError("invalid_request")
+		localprometheus.RecordAuthError("invalid_request")
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
 	}
 
 	// Track DB operations
-	defer prometheus.TrackDBOperation("update")(time.Now())
+	defer localprometheus.TrackDBOperation("update")(time.Now())
 
 	// Find user by ID
 	var user model.User
 	if result := database.GetDB().First(&user, userID); result.Error != nil {
 		log.Error("Failed to retrieve user for update", zap.Error(result.Error))
-		prometheus.RecordAuthError("profile_update_failed")
+		localprometheus.RecordAuthError("profile_update_failed")
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update profile"})
 	}
 
@@ -340,7 +357,7 @@ func UpdateProfile(c echo.Context) error {
 	// Save updated user profile
 	if result := database.GetDB().Save(&user); result.Error != nil {
 		log.Error("Failed to update profile", zap.Error(result.Error))
-		prometheus.RecordAuthError("profile_save_failed")
+		localprometheus.RecordAuthError("profile_save_failed")
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to save profile updates"})
 	}
 
@@ -360,13 +377,13 @@ func UpdateProfile(c echo.Context) error {
 // ChangePassword updates the user's password
 func ChangePassword(c echo.Context) error {
 	log := logger.FromContext(c)
-	prometheus.RecordAuthOperation("password_change")
+	localprometheus.RecordAuthOperation("password_change")
 
 	// Get user ID from context (set by AuthMiddleware)
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
 		log.Error("Failed to get user ID from context")
-		prometheus.RecordAuthError("unauthorized_password_change")
+		localprometheus.RecordAuthError("unauthorized_password_change")
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "authentication required"})
 	}
 
@@ -378,31 +395,31 @@ func ChangePassword(c echo.Context) error {
 
 	if err := c.Bind(&req); err != nil {
 		log.Error("Failed to parse password change request", zap.Error(err))
-		prometheus.RecordAuthError("invalid_request")
+		localprometheus.RecordAuthError("invalid_request")
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
 	}
 
 	if req.CurrentPassword == "" || req.NewPassword == "" {
 		log.Error("Missing password data")
-		prometheus.RecordAuthError("incomplete_password_change")
+		localprometheus.RecordAuthError("incomplete_password_change")
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "current and new password are required"})
 	}
 
 	// Track DB operations
-	defer prometheus.TrackDBOperation("update")(time.Now())
+	defer localprometheus.TrackDBOperation("update")(time.Now())
 
 	// Find user by ID
 	var user model.User
 	if result := database.GetDB().First(&user, userID); result.Error != nil {
 		log.Error("Failed to retrieve user for password change", zap.Error(result.Error))
-		prometheus.RecordAuthError("user_not_found")
+		localprometheus.RecordAuthError("user_not_found")
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update password"})
 	}
 
 	// Verify current password
 	if !checkPasswordHash(req.CurrentPassword, user.Password) {
 		log.Warn("Invalid current password", zap.Uint("user_id", userID))
-		prometheus.RecordAuthError("invalid_current_password")
+		localprometheus.RecordAuthError("invalid_current_password")
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "current password is incorrect"})
 	}
 
@@ -410,7 +427,7 @@ func ChangePassword(c echo.Context) error {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
 		log.Error("Failed to hash new password", zap.Error(err))
-		prometheus.RecordAuthError("password_hash_failed")
+		localprometheus.RecordAuthError("password_hash_failed")
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to process new password"})
 	}
 
@@ -418,7 +435,7 @@ func ChangePassword(c echo.Context) error {
 	user.Password = string(hashedPassword)
 	if result := database.GetDB().Save(&user); result.Error != nil {
 		log.Error("Failed to save new password", zap.Error(result.Error))
-		prometheus.RecordAuthError("password_update_failed")
+		localprometheus.RecordAuthError("password_update_failed")
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "failed to update password"})
 	}
 
@@ -429,7 +446,7 @@ func ChangePassword(c echo.Context) error {
 }
 
 func MetricsHandler(c echo.Context) error {
-	handler := prometheus.GetPrometheusHandler()
+	handler := localprometheus.GetPrometheusHandler()
 	handler.ServeHTTP(c.Response(), c.Request())
 	return nil
 }

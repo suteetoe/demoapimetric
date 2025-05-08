@@ -3,7 +3,7 @@
 
 ### Variables
 @baseUrl = http://localhost:8081
-@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJleHAiOjE3NDYyNTk5MjQsImlhdCI6MTc0NjE3MzUyNH0.X4sz3iMKOf7s7BW1TfbK-Pd1DzKtZi3eRjl1vtbn988
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXIyQGV4YW1wbGUuY29tIiwidXNlcl9pZCI6MzA2NiwiZXhwIjoxNzQ2NzgwMDA1LCJpYXQiOjE3NDY2OTM2MDV9.FI7qeypL1BsBFTFRph7J1amoNxyU_McQcdFyBB7JGWA
 
 ### Register User
 # Creates a new user account
@@ -11,7 +11,7 @@ POST {{baseUrl}}/auth/register
 Content-Type: application/json
 
 {
-  "email": "user@example.com",
+  "email": "user2@example.com",
   "password": "securepassword123",
   "first_name": "John",
   "last_name": "Doe"
@@ -23,7 +23,7 @@ POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
-  "email": "user@example.com",
+  "email": "user2@example.com",
   "password": "securepassword123"
 }
 

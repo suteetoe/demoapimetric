@@ -1,6 +1,6 @@
 ### Variables
 @baseUrl = http://localhost:8082
-@authToken = MjLkdaqXlaT5Y79wog82C4yfE8yPnXT1QPGnJ_X5xTo
+@authToken = _hUT_KuPuYHloWsbvFu7z0PGms0ZqPZZmKMgMwyHFXY
 
 ### List all products
 GET {{baseUrl}}/api/products

@@ -1,0 +1,207 @@
+version: '3.8'
+
+services:
+  # # Database service
+  # postgres:
+  #   image: postgres:14-alpine
+  #   container_name: microservices-postgres
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: microservices
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+  # Authentication Service
+  authen-service:
+    build:
+      context: ./services/authen-service
+      dockerfile: Dockerfile
+    container_name: authen-service
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+    environment:
+      SERVER_ENV: development
+      SERVER_PORT: 8080
+      DB_HOST: aws-0-ap-southeast-1.pooler.supabase.com
+      DB_PORT: 6543
+      DB_USER: postgres.qbgyhktoqpnptoidzqcf
+      DB_PASSWORD: Bbutuwbb9BmvAh0J
+      DB_NAME: postgres
+      DB_SSL_MODE: disable
+      JWT_SECRET: supersecretkey
+      JWT_EXPIRATION_HOURS: 24
+    ports:
+      - "8082:8080"
+    networks:
+      - microservices-network
+
+  # OAuth Service
+  oauth-service:
+    build:
+      context: ./services/oauth-service
+      dockerfile: Dockerfile
+    container_name: oauth-service
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+    environment:
+      SERVER_ENV: development
+      SERVER_PORT: 8080
+      DB_HOST: aws-0-ap-southeast-1.pooler.supabase.com
+      DB_PORT: 6543
+      DB_USER: postgres.qbgyhktoqpnptoidzqcf
+      DB_PASSWORD: Bbutuwbb9BmvAh0J
+      DB_NAME: postgres
+      TOKEN_SECRET: oauthsecretkey
+      ACCESS_TOKEN_EXPIRATION_MINUTES: 60
+      REFRESH_TOKEN_EXPIRATION_DAYS: 30
+    ports:
+      - "8084:8080"
+    networks:
+      - microservices-network
+
+  # Merchant Service
+  merchant-service:
+    build:
+      context: ./services/merchant-service
+      dockerfile: Dockerfile
+    container_name: merchant-service
+    depends_on:
+      # - postgres
+      - oauth-service
+    environment:
+      SERVER_ENV: development
+      SERVER_PORT: 8080
+      DB_HOST: aws-0-ap-southeast-1.pooler.supabase.com
+      DB_PORT: 6543
+      DB_USER: postgres.qbgyhktoqpnptoidzqcf
+      DB_PASSWORD: Bbutuwbb9BmvAh0J
+      DB_NAME: postgres
+      OAUTH_BASE_URL: http://oauth-service:8080
+      CLIENT_ID: merchant-service
+      CLIENT_SECRET: merchant-secret
+    ports:
+      - "8085:8080"
+    networks:
+      - microservices-network
+
+  # Product Service
+  product-service:
+    build:
+      context: ./services/product-service
+      dockerfile: Dockerfile
+    container_name: product-service
+    depends_on:
+      # - postgres
+      - oauth-service
+    environment:
+      SERVER_ENV: development
+      SERVER_PORT: 8080
+      DB_HOST: aws-0-ap-southeast-1.pooler.supabase.com
+      DB_PORT: 6543
+      DB_USER: postgres.qbgyhktoqpnptoidzqcf
+      DB_PASSWORD: Bbutuwbb9BmvAh0J
+      DB_NAME: postgres
+      OAUTH_BASE_URL: http://oauth-service:8080
+      CLIENT_ID: product-service
+      CLIENT_SECRET: product-secret
+      SUPPLIER_SERVICE_URL: http://supplier-service:8080
+    ports:
+      - "8086:8080"
+    networks:
+      - microservices-network
+
+  # Supplier Service
+  supplier-service:
+    build:
+      context: ./services/supplier-service
+      dockerfile: Dockerfile
+    container_name: supplier-service
+    depends_on:
+      # - postgres
+      - oauth-service
+    environment:
+      APP_ENV: development
+      SERVER_PORT: 8080
+      DB_HOST: aws-0-ap-southeast-1.pooler.supabase.com
+      DB_PORT: 6543
+      DB_USER: postgres.qbgyhktoqpnptoidzqcf
+      DB_PASSWORD: Bbutuwbb9BmvAh0J
+      DB_NAME: postgres
+      OAUTH_BASE_URL: http://oauth-service:8080
+      CLIENT_ID: supplier-service
+      CLIENT_SECRET: supplier-secret
+    ports:
+      - "8083:8080"
+    networks:
+      - microservices-network
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./Observability/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    networks:
+      - microservices-network
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./Observability/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - microservices-network
+
+  # Node Exporter for hardware and OS metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - "9100:9100"
+    networks:
+      - microservices-network
+
+networks:
+  microservices-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

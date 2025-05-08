@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o supplier-service ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o merchant-service ./cmd/main.go
 
 # Use a minimal alpine image for the final stage
 FROM alpine:3.18
@@ -25,7 +25,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 
 # Copy the binary from the builder stage
-COPY --from=builder /app/supplier-service .
+COPY --from=builder /app/merchant-service .
 
 # Expose the application port
 EXPOSE 8080
@@ -35,4 +35,4 @@ ENV APP_ENV=production
 ENV SERVER_PORT=8080
 
 # Run the application
-CMD ["./supplier-service"]
+CMD ["./merchant-service"]
