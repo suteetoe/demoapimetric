@@ -8,6 +8,7 @@ import (
 	"product-service/pkg/database"
 	"product-service/pkg/jwtutil"
 	"product-service/pkg/logger"
+	"product-service/pkg/oauth"
 	"product-service/prometheus"
 
 	"github.com/joho/godotenv"
@@ -42,7 +43,7 @@ func main() {
 		zap.String("environment", appConfig.Server.Env),
 		zap.String("port", appConfig.Server.Port))
 
-	// Initialize JWT utility
+	// Initialize JWT utility (for legacy support)
 	jwtutil.Initialize(&appConfig.JWT)
 	log.Info("JWT utility initialized")
 
@@ -57,6 +58,23 @@ func main() {
 		log.Fatal("Failed to initialize database", zap.Error(err))
 	}
 	log.Info("Database connection established")
+
+	// Initialize OAuth client if enabled
+	var oauthClient *oauth.Client
+	if appConfig.OAuth.Enabled {
+		oauthClient = oauth.NewClient(
+			appConfig.OAuth.BaseURL,
+			appConfig.OAuth.ClientID,
+			appConfig.OAuth.ClientSecret,
+			log.With(zap.String("component", "oauth_client")),
+		)
+		log.Info("OAuth client initialized",
+			zap.String("oauth_base_url", appConfig.OAuth.BaseURL),
+			zap.String("oauth_client_id", appConfig.OAuth.ClientID))
+
+		// Initialize the OAuth client for use in handlers
+		handler.InitOAuthClient(oauthClient)
+	}
 
 	// Initialize Echo instance
 	e := echo.New()
@@ -78,16 +96,43 @@ func main() {
 	// Legacy route
 	e.GET("/merchant/hello", handler.Hello)
 
-	// Product API routes - Apply auth middleware to validate JWT and extract tenant ID
-	productAPI := e.Group("/api/products", mid.AuthMiddleware)
+	// Example route that uses OAuth for service-to-service communication
+	if appConfig.OAuth.Enabled {
+		e.GET("/example/suppliers", handler.GetSuppliersExample)
+	}
+
+	// Product API routes
+	productAPI := e.Group("/api/products")
+
+	// Choose authentication method based on config
+	if appConfig.OAuth.Enabled && oauthClient != nil {
+		// Use OAuth2 authentication
+		log.Info("Using OAuth2 authentication for API routes")
+		productAPI.Use(oauth.Middleware(oauthClient, []string{"read", "write"}))
+	} else {
+		// Use legacy JWT authentication
+		log.Info("Using legacy JWT authentication for API routes")
+		productAPI.Use(mid.AuthMiddleware)
+	}
+
 	productAPI.GET("", handler.ListProducts)
 	productAPI.GET("/:id", handler.GetProduct)
 	productAPI.POST("", handler.CreateProduct)
 	productAPI.PUT("/:id", handler.UpdateProduct)
 	productAPI.DELETE("/:id", handler.DeleteProduct)
 
-	// Category API routes - Apply auth middleware to validate JWT and extract tenant ID
-	categoryAPI := e.Group("/api/categories", mid.AuthMiddleware)
+	// Category API routes
+	categoryAPI := e.Group("/api/categories")
+
+	// Choose authentication method based on config
+	if appConfig.OAuth.Enabled && oauthClient != nil {
+		// Use OAuth2 authentication
+		categoryAPI.Use(oauth.Middleware(oauthClient, []string{"product:read", "product:write"}))
+	} else {
+		// Use legacy JWT authentication
+		categoryAPI.Use(mid.AuthMiddleware)
+	}
+
 	categoryAPI.GET("", handler.ListCategories)
 	categoryAPI.GET("/:id", handler.GetCategory)
 	categoryAPI.POST("", handler.CreateCategory)

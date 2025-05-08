@@ -1,0 +1,76 @@
+# OAuth Service API Testing
+# Last updated: May 2, 2025
+
+### Variables
+@baseUrl = http://localhost:8084
+@clientId = {{register_client.response.body.client_id}}
+@clientSecret = {{register_client.response.body.client_secret}}
+@accessToken = T8-iF7_hRqlgQGMP0BPBhNY24tKbHSimEOgSfCc8A1Y
+@refreshToken = {{client_credentials.response.body.refresh_token}}
+
+### Health check
+GET {{baseUrl}}/health
+
+### Hello
+GET {{baseUrl}}/
+
+### Register a new client
+# @name register_client
+POST {{baseUrl}}/oauth/clients
+Content-Type: application/json
+
+{
+  "name": "Test Client",
+  "redirect_uris": ["http://localhost:3000/callback"],
+  "grants": ["client_credentials", "password", "refresh_token"],
+  "scopes": ["read write"]
+}
+
+### Get client info (requires client authentication)
+GET {{baseUrl}}/oauth/clients/{{clientId}}
+Authorization: Basic {{clientId}}:{{clientSecret}}
+
+### Get client credentials token
+# @name client_credentials
+POST {{baseUrl}}/oauth/token
+Authorization: Basic {{clientId}}:{{clientSecret}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&scope=read
+
+### Get token using password grant
+# @name password_grant
+POST {{baseUrl}}/oauth/token
+Authorization: Basic {{clientId}}:{{clientSecret}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&username=test@example.com&password=password&scope=read write&tenant_id=1
+
+### Refresh token
+# @name refresh_token
+POST {{baseUrl}}/oauth/token
+Authorization: Basic {{clientId}}:{{clientSecret}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&refresh_token={{refreshToken}}
+
+### Validate token (introspection)
+POST {{baseUrl}}/oauth/introspect
+Authorization: Basic {{clientId}}:{{clientSecret}}
+Content-Type: application/x-www-form-urlencoded
+
+token={{accessToken}}
+
+### Revoke token
+POST {{baseUrl}}/oauth/revoke
+Authorization: Basic {{clientId}}:{{clientSecret}}
+Content-Type: application/x-www-form-urlencoded
+
+token={{accessToken}}&token_type_hint=access_token
+
+### Access protected API endpoint
+GET {{baseUrl}}/api/protected
+Authorization: Bearer {{accessToken}}
+
+### Get metrics
+GET {{baseUrl}}/metrics

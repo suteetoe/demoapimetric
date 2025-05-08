@@ -14,9 +14,10 @@ var (
 	HttpRequestDuration prometheus.HistogramVec
 
 	// Authentication metrics
-	AuthAttemptsCounter prometheus.Counter
-	AuthSuccessCounter  prometheus.Counter
-	AuthErrorsCounter   prometheus.Counter
+	AuthAttemptsCounter   prometheus.Counter
+	AuthSuccessCounter    prometheus.Counter
+	AuthErrorsCounter     prometheus.Counter
+	AuthDurationHistogram prometheus.Histogram
 
 	// Tenant context metrics
 	TenantContextMissingCounter prometheus.Counter
@@ -80,6 +81,15 @@ func InitMetrics(config *config.Config) {
 		prometheus.CounterOpts{
 			Name: prefix + "_auth_errors_total",
 			Help: "Total number of authentication errors",
+		},
+	)
+
+	// Add the missing AuthDurationHistogram
+	AuthDurationHistogram = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    prefix + "_auth_duration_seconds",
+			Help:    "Duration of authentication operations in seconds",
+			Buckets: prometheus.DefBuckets,
 		},
 	)
 

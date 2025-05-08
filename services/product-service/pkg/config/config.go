@@ -45,6 +45,14 @@ type MetricsConfig struct {
 	Prefix string
 }
 
+// OAuthConfig holds OAuth client configuration
+type OAuthConfig struct {
+	BaseURL      string
+	ClientID     string
+	ClientSecret string
+	Enabled      bool
+}
+
 // Config holds all configuration
 type Config struct {
 	DB      DBConfig
@@ -52,6 +60,7 @@ type Config struct {
 	JWT     JWTConfig
 	Log     LogConfig
 	Metrics MetricsConfig
+	OAuth   OAuthConfig
 }
 
 // Load loads configuration from environment variables
@@ -88,6 +97,12 @@ func Load() (*Config, error) {
 		Metrics: MetricsConfig{
 			Prefix: getEnv("METRICS_PREFIX", "product"),
 		},
+		OAuth: OAuthConfig{
+			BaseURL:      getEnv("OAUTH_BASE_URL", "http://localhost:8084"),
+			ClientID:     getEnv("OAUTH_CLIENT_ID", ""),
+			ClientSecret: getEnv("OAUTH_CLIENT_SECRET", ""),
+			Enabled:      getEnvAsBool("OAUTH_ENABLED", false),
+		},
 	}
 
 	return config, nil
@@ -101,12 +116,22 @@ func (c *DBConfig) GetDSN() string {
 
 // LogConfig returns the configuration as a zap logger-friendly format
 func (c *Config) LogConfig() []zap.Field {
-	return []zap.Field{
+	fields := []zap.Field{
 		zap.String("environment", c.Server.Env),
 		zap.String("db_host", c.DB.Host),
 		zap.String("db_name", c.DB.DBName),
 		zap.String("server_port", c.Server.Port),
 	}
+
+	if c.OAuth.Enabled {
+		fields = append(fields,
+			zap.String("oauth_base_url", c.OAuth.BaseURL),
+			zap.String("oauth_client_id", c.OAuth.ClientID),
+			zap.Bool("oauth_enabled", c.OAuth.Enabled),
+		)
+	}
+
+	return fields
 }
 
 // Helper function to get environment variables with defaults
