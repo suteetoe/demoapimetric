@@ -3,14 +3,26 @@ FROM golang:1.23-alpine AS builder
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy go.mod and go.sum files
-COPY go.mod go.sum ./
+# Create gomicro directory
+RUN mkdir -p /app/gomicro
+
+# Copy gomicro module files
+COPY gomicro/ /app/gomicro/
+
+# Copy service-specific go.mod and go.sum files
+COPY services/authen-service/go.mod services/authen-service/go.sum ./
+
+# Fix replace directive in go.mod
+RUN sed -i 's|replace github.com/suteetoe/gomicro => ../../gomicro|replace github.com/suteetoe/gomicro => /app/gomicro|g' go.mod
 
 # Download dependencies
 RUN go mod download
 
-# Copy the source code
-COPY . .
+# Copy the service source code
+COPY services/authen-service/ .
+
+# Fix replace directive in go.mod
+RUN sed -i 's|replace github.com/suteetoe/gomicro => ../../gomicro|replace github.com/suteetoe/gomicro => /app/gomicro|g' go.mod
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o authen-service ./cmd/main.go

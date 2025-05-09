@@ -22,8 +22,8 @@ services:
   # Authentication Service
   authen-service:
     build:
-      context: ./services/authen-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/authen-service/Dockerfile
     container_name: authen-service
     # depends_on:
     #   postgres:
@@ -47,8 +47,8 @@ services:
   # OAuth Service
   oauth-service:
     build:
-      context: ./services/oauth-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/oauth-service/Dockerfile
     container_name: oauth-service
     # depends_on:
     #   postgres:
@@ -72,8 +72,8 @@ services:
   # Merchant Service
   merchant-service:
     build:
-      context: ./services/merchant-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/merchant-service/Dockerfile
     container_name: merchant-service
     depends_on:
       # - postgres
@@ -97,8 +97,8 @@ services:
   # Product Service
   product-service:
     build:
-      context: ./services/product-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/product-service/Dockerfile
     container_name: product-service
     depends_on:
       # - postgres
@@ -123,8 +123,8 @@ services:
   # Supplier Service
   supplier-service:
     build:
-      context: ./services/supplier-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/supplier-service/Dockerfile
     container_name: supplier-service
     depends_on:
       # - postgres

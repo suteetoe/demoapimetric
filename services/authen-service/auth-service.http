@@ -2,8 +2,8 @@
 # Last updated: May 2, 2025
 
 ### Variables
-@baseUrl = http://localhost:8081
-@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXIyQGV4YW1wbGUuY29tIiwidXNlcl9pZCI6MzA2NiwiZXhwIjoxNzQ2NzgwMDA1LCJpYXQiOjE3NDY2OTM2MDV9.FI7qeypL1BsBFTFRph7J1amoNxyU_McQcdFyBB7JGWA
+@baseUrl = http://localhost:8181
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJleHAiOjE3NDY4NTM5NzIsImlhdCI6MTc0Njc2NzU3Mn0.mlZawbX5GSEGZdg0Gr6GEZAQjfpwxwNNQyGrC-d1onM
 
 ### Register User
 # Creates a new user account
@@ -11,7 +11,7 @@ POST {{baseUrl}}/auth/register
 Content-Type: application/json
 
 {
-  "email": "user2@example.com",
+  "email": "user@example.com",
   "password": "securepassword123",
   "first_name": "John",
   "last_name": "Doe"
@@ -23,7 +23,7 @@ POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
-  "email": "user2@example.com",
+  "email": "user@example.com",
   "password": "securepassword123"
 }
 

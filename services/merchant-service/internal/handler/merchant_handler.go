@@ -2,7 +2,6 @@ package handler
 
 import (
 	"merchant-service/internal/model"
-	"merchant-service/prometheus"
 	"net/http"
 	"strconv"
 
@@ -16,7 +15,6 @@ import (
 // CreateMerchant handles merchant creation
 func CreateMerchant(c echo.Context) error {
 	log := logger.FromEcho(c)
-	prometheus.CreateMerchantCounter.Inc()
 
 	// Get user ID and tenant ID from context (set by AuthMiddleware)
 	claims, ok := c.Get("user").(*jwtutil.UserClaims)
@@ -79,7 +77,6 @@ func CreateMerchant(c echo.Context) error {
 // GetMerchant retrieves merchant details
 func GetMerchant(c echo.Context) error {
 	log := logger.FromEcho(c)
-	prometheus.GetMerchantCounter.Inc()
 
 	// Get user ID and tenant ID from context (set by AuthMiddleware)
 	claims, ok := c.Get("user").(*jwtutil.UserClaims)
@@ -132,7 +129,6 @@ func GetMerchant(c echo.Context) error {
 // ListMerchantsByOwner retrieves all merchants associated with an owner
 func ListMerchantsByOwner(c echo.Context) error {
 	log := logger.FromEcho(c)
-	prometheus.ListMerchantsCounter.Inc()
 
 	// Get user ID and tenant ID from context (set by AuthMiddleware)
 	claims, ok := c.Get("user").(*jwtutil.UserClaims)
@@ -160,11 +156,4 @@ func ListMerchantsByOwner(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, merchants)
-}
-
-// MetricsHandler exposes Prometheus metrics
-func MetricsHandler(c echo.Context) error {
-	handler := prometheus.GetPrometheusHandler()
-	handler.ServeHTTP(c.Response(), c.Request())
-	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/suteetoe/gomicro/database"
 	"github.com/suteetoe/gomicro/jwtutil"
 	"github.com/suteetoe/gomicro/logger"
+	"github.com/suteetoe/gomicro/metrics" // Import the new metrics package
 	"github.com/suteetoe/gomicro/middleware"
 )
 
@@ -58,12 +59,19 @@ func main() {
 	}
 	jwt := jwtutil.NewJWTUtil(jwtConfig)
 
+	// Initialize HTTP metrics
+	httpMetrics := metrics.NewHTTPMetrics(conf.ServiceName)
+
 	// Initialize Echo framework
 	e := echo.New()
 
 	// Apply middleware
 	e.Use(middleware.RequestIDMiddleware())
 	e.Use(logger.Middleware())
+	e.Use(httpMetrics.Middleware()) // Use the centralized metrics middleware
+
+	// Metrics endpoint
+	e.GET("/metrics", echo.WrapHandler(metrics.GetPrometheusHandler()))
 
 	// Public routes
 	e.GET("/merchant/hello", handler.Hello) // Public endpoint, doesn't need auth

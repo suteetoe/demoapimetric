@@ -1,9 +1,9 @@
 # Merchant Service Endpoints
-# Last updated: May 2, 2025
+# Last updated: May 9, 2025
 
 ### Variables
-@baseUrl = http://localhost:8082
-@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJtZXJjaGFudF9pZCI6MSwiZXhwIjoxNzQ2MDY4NTY2LCJpYXQiOjE3NDYwNjQ5NjZ9.av13J_jb75PPVyj19-luqhH_p8Rk-fK_lPBZABobDiM
+@baseUrl = http://localhost:8182
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VyX2lkIjoxLCJ0ZW5hbnRfaWQiOjEsInRlbmFudF9uYW1lIjoiTXkgQ29tcGFueSIsInJvbGUiOiJvd25lciIsImV4cCI6MTc0Njg1NDA5MiwiaWF0IjoxNzQ2NzY3NjkyfQ.U32sE_12rvoye7k3Pd_fKp2OS1dZzdsafoj_1-35nJw
 
 ### Create Merchant
 POST {{baseUrl}}/merchants
@@ -11,9 +11,8 @@ Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "name": "My Store",
-  "description": "My awesome online store",
-  "owner_id": 1
+  "name": "E-Commerce Store",
+  "description": "Premium online shopping experience"
 }
 
 ### Get Merchant by ID
@@ -21,7 +20,7 @@ GET {{baseUrl}}/merchants/1
 Authorization: Bearer {{authToken}}
 
 ### List Merchants by Owner
-GET {{baseUrl}}/merchants?owner_id=1
+GET {{baseUrl}}/merchants
 Authorization: Bearer {{authToken}}
 
 ### List All Merchants (with pagination)
@@ -35,7 +34,7 @@ Content-Type: application/json
 
 {
   "name": "Updated Store Name",
-  "description": "Updated store description"
+  "description": "Our rebranded online marketplace"
 }
 
 ### Delete Merchant
