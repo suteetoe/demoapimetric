@@ -9,6 +9,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.13.3
 	github.com/prometheus/client_golang v1.22.0
+	github.com/suteetoe/gomicro v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.37.0
 	gorm.io/driver/postgres v1.5.11
@@ -41,3 +42,5 @@ require (
 	golang.org/x/time v0.11.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
 )
+
+replace github.com/suteetoe/gomicro => ../../gomicro

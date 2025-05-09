@@ -8,10 +8,13 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.13.3
 	github.com/prometheus/client_golang v1.22.0
+	github.com/suteetoe/gomicro v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.27.0
 	gorm.io/driver/postgres v1.5.11
 	gorm.io/gorm v1.26.0
 )
+
+replace github.com/suteetoe/gomicro => ../../gomicro
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

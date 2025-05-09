@@ -3,17 +3,16 @@ package main
 import (
 	"fmt"
 	"merchant-service/internal/handler"
-	mid "merchant-service/internal/middleware"
-	"merchant-service/pkg/database"
-	applogger "merchant-service/pkg/logger"
+	"merchant-service/internal/model"
 	"os"
-	"strconv"
-	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
-	"go.uber.org/zap"
-	"gorm.io/gorm/logger"
+	"github.com/suteetoe/gomicro/config"
+	"github.com/suteetoe/gomicro/database"
+	"github.com/suteetoe/gomicro/jwtutil"
+	"github.com/suteetoe/gomicro/logger"
+	"github.com/suteetoe/gomicro/middleware"
 )
 
 func main() {
@@ -22,92 +21,62 @@ func main() {
 		fmt.Printf("Warning: .env file not found or error loading: %v\n", err)
 	}
 
+	// Load configuration using gomicro
+	conf, err := config.Load("merchant")
+	if err != nil {
+		fmt.Printf("Error loading configuration: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Initialize logger
-	zapLogger, _ := zap.NewProduction()
-	defer zapLogger.Sync()
-	log := zapLogger.Sugar()
+	err = logger.InitLogger(&logger.LogConfig{
+		Level:       conf.Log.Level,
+		Environment: conf.Server.Env,
+		ServiceName: conf.ServiceName,
+	})
+	if err != nil {
+		fmt.Printf("Error initializing logger: %v\n", err)
+		os.Exit(1)
+	}
+	log := logger.GetLogger()
 
-	// Get database configuration from environment variables
-	dbConfig := database.DBConfig{
-		DSN:             getEnv("DB_DSN", "postgresql://postgres.qbgyhktoqpnptoidzqcf:Bbutuwbb9BmvAh0J@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"),
-		MaxIdleConns:    getEnvAsInt("DB_MAX_IDLE_CONNS", 10),
-		MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 100),
-		ConnMaxLifetime: getEnvAsDuration("DB_CONN_MAX_LIFETIME", 1*time.Hour),
-		LogLevel:        getEnvAsLogLevel("DB_LOG_LEVEL", logger.Info),
+	// Initialize database connection using the DBConfig from the conf object directly
+	_, err = database.InitDB(&conf.DB)
+	if err != nil {
+		log.Fatal("Failed to initialize database")
 	}
 
-	// Initialize database
-	if err := database.Initialize(dbConfig); err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+	// Run migrations for merchant models
+	if err := database.MigrateModels(&model.Merchant{}); err != nil {
+		log.Fatal("Failed to migrate database models")
 	}
 
+	// Initialize JWT utility
+	jwtConfig := &jwtutil.JWTConfig{
+		SigningKey:      conf.JWT.SigningKey,
+		ExpirationHours: conf.JWT.ExpirationHours,
+	}
+	jwt := jwtutil.NewJWTUtil(jwtConfig)
+
+	// Initialize Echo framework
 	e := echo.New()
-	e.Use(mid.RequestIDMiddleware)
-	e.Use(applogger.Middleware(zapLogger))
+
+	// Apply middleware
+	e.Use(middleware.RequestIDMiddleware())
+	e.Use(logger.Middleware())
 
 	// Public routes
 	e.GET("/merchant/hello", handler.Hello) // Public endpoint, doesn't need auth
 
 	// Secured routes - require authentication
 	merchants := e.Group("/merchants")
-	merchants.Use(mid.AuthMiddleware) // Apply auth middleware to all merchant routes
+	merchants.Use(middleware.JWTAuthMiddleware(jwt)) // Apply auth middleware to all merchant routes
 
 	merchants.POST("", handler.CreateMerchant)
 	merchants.GET("/:id", handler.GetMerchant)
 	merchants.GET("", handler.ListMerchantsByOwner)
 
-	// Merchant Users routes
-	merchants.POST("/:merchant_id/users", handler.AddUserToMerchant)
-	merchants.DELETE("/:merchant_id/users/:user_id", handler.RemoveUserFromMerchant)
-	merchants.GET("/:merchant_id/users", handler.ListMerchantUsers)
-
-	// User-specific merchant routes
-	e.GET("/user/merchants", handler.GetUserMerchants, mid.AuthMiddleware)
-
-	// Get server port from environment variable
-	port := getEnv("SERVER_PORT", "8082")
-
 	// Start server
-	log.Infof("Starting server on :%s", port)
-	e.Logger.Fatal(e.Start(":" + port))
-}
-
-// Helper functions to get environment variables with defaults
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := getEnv(key, "")
-	if value, err := strconv.Atoi(valueStr); err == nil {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := getEnv(key, "")
-	if value, err := time.ParseDuration(valueStr); err == nil {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvAsLogLevel(key string, defaultValue logger.LogLevel) logger.LogLevel {
-	valueStr := getEnv(key, "")
-	switch valueStr {
-	case "silent":
-		return logger.Silent
-	case "error":
-		return logger.Error
-	case "warn":
-		return logger.Warn
-	case "info":
-		return logger.Info
-	default:
-		return defaultValue
-	}
+	log.Info("Starting merchant-service on port " + conf.Server.Port)
+	e.Logger.Fatal(e.Start(":" + conf.Server.Port))
 }
