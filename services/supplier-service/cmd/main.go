@@ -13,7 +13,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/suteetoe/gomicro/metrics" // Import the gomicro metrics package
 	"go.uber.org/zap"
 )
 
@@ -37,6 +37,10 @@ func main() {
 	prometheus.InitMetrics(cfg)
 	log.Info("Prometheus metrics initialized")
 
+	// Initialize HTTP metrics from gomicro
+	httpMetrics := metrics.NewHTTPMetrics("supplier-service")
+	log.Info("gomicro HTTP metrics initialized")
+
 	// Initialize database and run migrations
 	if err := database.InitDB(cfg); err != nil {
 		log.Fatal("Failed to initialize database", zap.Error(err))
@@ -50,6 +54,7 @@ func main() {
 	e.Use(echomiddleware.Recover())
 	e.Use(echomiddleware.CORS())
 	e.Use(middleware.RequestIDMiddleware)
+	e.Use(httpMetrics.Middleware()) // Add gomicro metrics middleware
 
 	// Request logging middleware
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -73,7 +78,8 @@ func main() {
 				zap.String("ip", c.RealIP()),
 			)
 
-			// Update Prometheus metrics
+			// Update legacy Prometheus metrics for backward compatibility
+			// (gomicro metrics middleware now handles the standardized metrics)
 			prometheus.HttpRequestsTotal.WithLabelValues(
 				c.Request().Method,
 				c.Request().URL.Path,
@@ -96,7 +102,7 @@ func main() {
 	e.GET("/health", handler.Hello)
 
 	// Prometheus metrics endpoint
-	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
+	e.GET("/metrics", echo.WrapHandler(metrics.GetPrometheusHandler())) // Use gomicro metrics handler
 
 	// API routes that require authentication
 	api := e.Group("/api")

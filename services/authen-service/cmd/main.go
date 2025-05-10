@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/suteetoe/gomicro/metrics" // Import the gomicro metrics package
 	"go.uber.org/zap"
 )
 
@@ -40,6 +41,10 @@ func main() {
 	prometheus.InitMetrics(cfg)
 	log.Info("Prometheus metrics initialized")
 
+	// Initialize HTTP metrics from gomicro
+	httpMetrics := metrics.NewHTTPMetrics("authen-service")
+	log.Info("gomicro HTTP metrics initialized")
+
 	// Initialize Echo framework
 	e := echo.New()
 
@@ -48,11 +53,12 @@ func main() {
 	e.Use(echomiddleware.CORS())    // Add CORS middleware
 	e.Use(middleware.RequestIDMiddleware)
 	e.Use(logger.Middleware(log))
-	e.Use(prometheus.MetricsMiddleware())
+	e.Use(prometheus.MetricsMiddleware()) // Keep existing metrics middleware for backward compatibility
+	e.Use(httpMetrics.Middleware())       // Add gomicro metrics middleware
 
 	// Public routes - no authentication required
 	e.GET("/health", handler.HealthCheck)
-	e.GET("/metrics", handler.MetricsHandler)
+	e.GET("/metrics", echo.WrapHandler(metrics.GetPrometheusHandler())) // This now uses gomicro metrics
 
 	// Authentication routes - these don't belong under /api since they're for getting access to the API
 	auth := e.Group("/auth")

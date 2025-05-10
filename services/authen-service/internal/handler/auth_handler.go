@@ -445,20 +445,6 @@ func ChangePassword(c echo.Context) error {
 	})
 }
 
-func MetricsHandler(c echo.Context) error {
-	handler := localprometheus.GetPrometheusHandler()
-	handler.ServeHTTP(c.Response(), c.Request())
-	return nil
-}
-
-// HealthCheck handles the health check endpoint
-func HealthCheck(c echo.Context) error {
-	return c.JSON(http.StatusOK, echo.Map{
-		"status":  "healthy",
-		"service": "authen-service",
-	})
-}
-
 // Helper function to safely handle nil uint pointers for logging
 func nilSafeUint(val *uint) uint {
 	if val == nil {

@@ -14,7 +14,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/suteetoe/gomicro/metrics" // Import the gomicro metrics package
 	"go.uber.org/zap"
 )
 
@@ -52,6 +52,10 @@ func main() {
 	log.Info("Prometheus metrics initialized",
 		zap.String("metrics_prefix", appConfig.Metrics.Prefix))
 
+	// Initialize HTTP metrics from gomicro
+	httpMetrics := metrics.NewHTTPMetrics("product-service")
+	log.Info("gomicro HTTP metrics initialized")
+
 	// Initialize database
 	err = database.InitDB(appConfig)
 	if err != nil {
@@ -82,11 +86,12 @@ func main() {
 	// Middleware
 	e.Use(middleware.Recover())
 	e.Use(mid.RequestIDMiddleware)
-	e.Use(mid.MetricsMiddleware)
+	e.Use(mid.MetricsMiddleware) // Keep existing metrics middleware for backward compatibility
+	e.Use(httpMetrics.Middleware()) // Add gomicro metrics middleware
 
 	// Routes
 	// Metrics endpoint
-	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
+	e.GET("/metrics", echo.WrapHandler(metrics.GetPrometheusHandler())) // Use gomicro metrics handler
 
 	// Health check endpoint
 	e.GET("/health", func(c echo.Context) error {
